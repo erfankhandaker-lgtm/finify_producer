@@ -1,0 +1,75 @@
+BEGIN;
+
+CREATE TABLE "MIG003_CHARGE_BACKUP" AS TABLE "SW_TBL_CHARGE";
+CREATE TABLE "MIG003_CHARGE_DETAILS_BACKUP" AS TABLE "SW_TBL_CHARGE_DETAILS";
+CREATE TABLE "MIG003_CHARGE_MAPPING_BACKUP" AS TABLE "SW_TBL_CHARGE_MAPPING";
+CREATE TABLE "MIG003_KEYWORD_CHARGE_BACKUP" AS TABLE "SW_TBL_KEYWORD_CHARGE";
+
+ALTER TABLE "SW_TBL_CHARGE" DROP CONSTRAINT "FK_CHARGE_DEFAULT_CHARGE";
+ALTER TABLE "SW_TBL_KEYWORD_CHARGE" DROP CONSTRAINT "FK_KEYWORD_CHARGE_CHARGE";
+ALTER TABLE "SW_TBL_CHARGE_DETAILS" DROP CONSTRAINT "FK_CHARGE_DETAILS_CHARGE";
+DROP INDEX "UQ_CHARGE_MAPPING_KEYWORD_CHARGE_ID";
+
+DELETE FROM "SW_TBL_KEYWORD_CHARGE";
+DELETE FROM "SW_TBL_CHARGE_DETAILS";
+DELETE FROM "SW_TBL_CHARGE_MAPPING";
+DELETE FROM "SW_TBL_CHARGE";
+
+INSERT INTO "SW_TBL_CHARGE" (
+  "Charge_ID", "Charge_Type", "Expiry_On", "Status", "Def_Charge_ID",
+  "Created_By", "Created_Date", "Approved_By", "Approved_Date", "Charge_Description"
+) VALUES
+  (1, 0, NULL, 1, NULL, 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 'PMNT fixed flat charge'),
+  (2, 1, NULL, 1, NULL, 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 'SEND flexible charge');
+
+INSERT INTO "SW_TBL_CHARGE_DETAILS" (
+  "Charge_ID", "Charge_Type", "Charge_Value", "Start_Range", "End_Range", "Min_Charge", "Max_Charge"
+) VALUES
+  (1, 'Flat',       10.00,       0.00, 999999999999.99, 0.00,   0.00),
+  (2, 'Flat',        5.00,       0.00,          1000.00, 0.00,   0.00),
+  (2, 'Percentage',  1.00,    1000.01,         10000.00, 10.00, 100.00),
+  (2, 'Percentage',  0.50,   10000.01, 999999999999.99, 50.00, 500.00);
+
+INSERT INTO "SW_TBL_CHARGE_MAPPING" (
+  "Keyword_Charge_Id", "Description", "Is_Default", "Status",
+  "Created_By", "Created_Date", "Approved_By", "Approved_Date", "OperationType"
+) VALUES
+  (1, 'Default PMNT mapping', 1, 1, 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 'I'),
+  (2, 'SEND wallet mapping',  0, 1, 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 'I');
+
+INSERT INTO "SW_TBL_KEYWORD_CHARGE" (
+  "Keywod_Charge_Id", "Keyword", "Charge_Id", "Payer", "Description",
+  "Created_BY", "Created_Date", "Approved_BY", "Approved_Date",
+  "Is_Default", "Charge_Map_Id", "Status"
+) VALUES
+  (1, 'PMNT', 1, 'S', 'Default PMNT source-paid charge', 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 1, 1, 1),
+  (2, 'SEND', 2, 'D', 'SEND wallet 2 destination-paid charge', 'dev_maker', CURRENT_TIMESTAMP, 'dev_checker', CURRENT_TIMESTAMP, 0, 2, 1);
+
+SELECT setval(pg_get_serial_sequence('"SW_TBL_CHARGE"', 'ROW_ID'), (SELECT max("ROW_ID") FROM "SW_TBL_CHARGE"), true);
+SELECT setval(pg_get_serial_sequence('"SW_TBL_CHARGE_DETAILS"', 'Row_ID'), (SELECT max("Row_ID") FROM "SW_TBL_CHARGE_DETAILS"), true);
+SELECT setval(pg_get_serial_sequence('"SW_TBL_CHARGE_MAPPING"', 'RowId'), (SELECT max("RowId") FROM "SW_TBL_CHARGE_MAPPING"), true);
+SELECT setval(pg_get_serial_sequence('"SW_TBL_KEYWORD_CHARGE"', 'Row_Id'), (SELECT max("Row_Id") FROM "SW_TBL_KEYWORD_CHARGE"), true);
+
+ALTER TABLE "SW_TBL_CHARGE_MAPPING"
+  ADD CONSTRAINT "UQ_CHARGE_MAPPING_KEYWORD_CHARGE_ID" UNIQUE ("Keyword_Charge_Id");
+ALTER TABLE "SW_TBL_CHARGE_DETAILS"
+  ADD CONSTRAINT "FK_CHARGE_DETAILS_CHARGE" FOREIGN KEY ("Charge_ID")
+  REFERENCES "SW_TBL_CHARGE" ("Charge_ID") ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE "SW_TBL_KEYWORD_CHARGE"
+  ADD CONSTRAINT "FK_KEYWORD_CHARGE_CHARGE" FOREIGN KEY ("Charge_Id")
+  REFERENCES "SW_TBL_CHARGE" ("Charge_ID") ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE "SW_TBL_CHARGE"
+  ADD CONSTRAINT "FK_CHARGE_DEFAULT_CHARGE" FOREIGN KEY ("Def_Charge_ID")
+  REFERENCES "SW_TBL_CHARGE" ("Charge_ID") ON UPDATE RESTRICT ON DELETE RESTRICT;
+ALTER TABLE "SW_TBL_KEYWORD_CHARGE"
+  ADD CONSTRAINT "FK_KEYWORD_CHARGE_MAPPING" FOREIGN KEY ("Keywod_Charge_Id")
+  REFERENCES "SW_TBL_CHARGE_MAPPING" ("Keyword_Charge_Id") ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+CREATE UNIQUE INDEX "UQ_ACTIVE_KEYWORD_CHARGE_LOOKUP"
+  ON "SW_TBL_KEYWORD_CHARGE" ("Keyword", "Charge_Map_Id")
+  WHERE "Status" = 1 AND "Is_Default" = 0;
+CREATE UNIQUE INDEX "UQ_ACTIVE_DEFAULT_KEYWORD_CHARGE"
+  ON "SW_TBL_KEYWORD_CHARGE" ("Keyword")
+  WHERE "Status" = 1 AND "Is_Default" = 1;
+
+COMMIT;
