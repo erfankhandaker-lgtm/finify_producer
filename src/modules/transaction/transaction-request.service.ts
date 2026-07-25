@@ -1,5 +1,5 @@
-import { SwTblTransactionEntry, TransactionRequest } from '@models/index';
-import { Injectable } from '@nestjs/common'
+import { SwTblTransactionEntry, SwTblWallet, TransactionRequest } from '@models/index';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { CreateTransactionRequestDto, PaginationDto, UpdateTransactionRequestDto } from './dto/transaction-request.dto';
 import { winstonLog } from '@config/winstonLog';
@@ -13,6 +13,7 @@ export  class TransactionRequestService {
     constructor(
         @InjectRepository(TransactionRequest) private readonly transactionRequestRepository: Repository<TransactionRequest>,
         @InjectRepository(SwTblTransactionEntry) private readonly transactionEntryRepository: Repository<SwTblTransactionEntry>,
+        @InjectRepository(SwTblWallet) private readonly walletRepository: Repository<SwTblWallet>,
     ){}
 
     async generateTransactionID(createTransactionDto: CreateTransactionDto){
@@ -25,6 +26,25 @@ export  class TransactionRequestService {
     }
 
     async   create(createTransactionDto: CreateTransactionDto){
+        const [sourceWallet, destinationWallet] = await Promise.all([
+          this.walletRepository.findOne({ where: { walletMsisdn: createTransactionDto.sourceAccount } }),
+          this.walletRepository.findOne({ where: { walletMsisdn: createTransactionDto.destinationAccount } }),
+        ]);
+        if (!sourceWallet || !destinationWallet) {
+          throw new NotFoundException('Source and destination wallets must exist');
+        }
+        if (sourceWallet.status !== 0 || destinationWallet.status !== 0) {
+          throw new BadRequestException('Source and destination wallets must be active');
+        }
+        const sourceCurrency = String(sourceWallet.currency || '').trim().toUpperCase();
+        const destinationCurrency = String(destinationWallet.currency || '').trim().toUpperCase();
+        const requestedCurrency = String(createTransactionDto.currency || sourceCurrency).trim().toUpperCase();
+        if (!/^[A-Z]{3}$/.test(requestedCurrency)) {
+          throw new BadRequestException('A valid ISO transaction currency is required');
+        }
+        if (sourceCurrency !== requestedCurrency || destinationCurrency !== requestedCurrency) {
+          throw new BadRequestException('Normal transfers require source, destination, and transaction currencies to match');
+        }
         const transactionReq: CreateTransactionRequestDto = {
             keyword: createTransactionDto.keyword,
             sourceWalletId: createTransactionDto.sourceAccount,
@@ -32,7 +52,7 @@ export  class TransactionRequestService {
             amount: createTransactionDto.amount,
             destWalletFullname:'',
             pin:'',
-            currency:'',
+            currency:requestedCurrency,
             remarks:''
  
    
@@ -50,7 +70,7 @@ export  class TransactionRequestService {
            TRNID: ID,
            transactionId: transectionId,
          }));
-         return {transectionId, ID};
+         return {transectionId, ID, currency: requestedCurrency};
     }
 
     async update( updateData: UpdateTransactionRequestDto) {

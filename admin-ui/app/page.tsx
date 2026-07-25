@@ -46,6 +46,20 @@ const initialForm: FormData = {
   displayName: '', username: '', email: '', password: '', confirmPassword: '', setupToken: '',
 };
 
+async function fetchSetupStatus(): Promise<SetupStatus> {
+  try {
+    const response = await fetch(`${API_URL}/admin/auth/setup/status`, { cache: 'no-store' });
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    return {
+      state: data.needsSetup ? 'ready' : 'configured',
+      tokenRequired: Boolean(data.setupTokenRequired),
+    };
+  } catch {
+    return { state: 'offline', tokenRequired: false };
+  }
+}
+
 export default function SetupPage() {
   const [step, setStep] = useState(0);
   const [status, setStatus] = useState<SetupStatus>({ state: 'checking', tokenRequired: false });
@@ -56,20 +70,18 @@ export default function SetupPage() {
 
   const checkStatus = async () => {
     setStatus({ state: 'checking', tokenRequired: false });
-    try {
-      const response = await fetch(`${API_URL}/admin/auth/setup/status`, { cache: 'no-store' });
-      if (!response.ok) throw new Error();
-      const data = await response.json();
-      setStatus({
-        state: data.needsSetup ? 'ready' : 'configured',
-        tokenRequired: Boolean(data.setupTokenRequired),
-      });
-    } catch {
-      setStatus({ state: 'offline', tokenRequired: false });
-    }
+    setStatus(await fetchSetupStatus());
   };
 
-  useEffect(() => { void checkStatus(); }, []);
+  useEffect(() => {
+    let active = true;
+    void fetchSetupStatus().then((nextStatus) => {
+      if (active) setStatus(nextStatus);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const passwordChecks = useMemo(() => [
     { label: '12+ characters', valid: form.password.length >= 12 },

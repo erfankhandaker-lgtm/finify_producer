@@ -31,5 +31,5 @@
       ]
     }
   },
-  "exclude": ["admin-ui", "node_modules", "dist"]
+  "exclude": ["admin-ui", "consumer-service", "node_modules", "dist"]
 }

@@ -46,6 +46,28 @@ export const UNAUTHORIZED = ( message, req)=>{
 
 }
 
+//403
+export const FORBIDDEN = (message, req) => {
+    const response = {
+        issuccess: false,
+        statusCode: 403,
+        message: message || 'Forbidden',
+    };
+    responseBodyLog(response)
+    return response
+}
+
+//409
+export const CONFLICT = (message, req) => {
+    const response = {
+        issuccess: false,
+        statusCode: 409,
+        message: message || 'Conflict',
+    };
+    responseBodyLog(response)
+    return response
+}
+
 //404
 export const NOT_FOUND  = (message, req)=>{
 

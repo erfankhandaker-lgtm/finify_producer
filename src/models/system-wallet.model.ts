@@ -7,6 +7,7 @@ export class SwTblWallet {
   @Column({ type: 'numeric', name: 'Amount', nullable: true }) amount: string;
   @Column({ type: 'smallint', name: 'Status', nullable: true }) status: number;
   @Column({ type: 'uuid', name: 'Account_code' }) accountCode: string;
+  @Column({ type: 'text', name: 'currency' }) currency: string;
 }
 
 @Entity({ name: 'SW_TBL_WALLET_TYPE', synchronize: false })

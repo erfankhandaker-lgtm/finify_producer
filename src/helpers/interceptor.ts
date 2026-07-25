@@ -10,12 +10,14 @@ import {
   UnprocessableEntityException,
   NotFoundException,
   UnauthorizedException,
+  ForbiddenException,
+  ConflictException,
   ExceptionFilter, Catch, ArgumentsHost, Logger
 } from '@nestjs/common';
 import { Observable, throwError, TimeoutError, of } from 'rxjs';
 import { tap, catchError,map,timeout } from 'rxjs/operators';
 import { APP_INTERCEPTOR, APP_FILTER } from '@nestjs/core';
-import {OK, UNPROCESSABLE_ENTITY, INTERNAL_SERVER_ERROR,NOT_FOUND, UNAUTHORIZED,BAD_REQUEST} from './responseHelper'
+import {OK, UNPROCESSABLE_ENTITY, INTERNAL_SERVER_ERROR,NOT_FOUND, UNAUTHORIZED,BAD_REQUEST,FORBIDDEN,CONFLICT} from './responseHelper'
 import { Request, Response } from 'express'
 
 @Injectable()
@@ -67,6 +69,16 @@ export class ErrorsInterceptor implements NestInterceptor {
           else if (err instanceof UnauthorizedException) {
 
             return throwError(new UnauthorizedException(UNAUTHORIZED(error.response?error.response.message:null,req)))
+
+          }
+          else if (err instanceof ForbiddenException) {
+
+            return throwError(new ForbiddenException(FORBIDDEN(error.response?error.response.message:null,req)))
+
+          }
+          else if (err instanceof ConflictException) {
+
+            return throwError(new ConflictException(CONFLICT(error.response?error.response.message:null,req)))
 
           }
           else if (err instanceof BadRequestException) {

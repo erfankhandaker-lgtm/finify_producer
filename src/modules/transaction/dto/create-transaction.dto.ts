@@ -31,6 +31,8 @@ export class CreateTransactionDto {
     @IsNumber()
     readonly payment_type?: number;
     @IsOptional()
+    @IsString()
+    @Matches(/^[A-Za-z]{3}$/)
     readonly currency?: string;
     @IsOptional()
     readonly lang?: string;

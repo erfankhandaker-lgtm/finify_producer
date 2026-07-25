@@ -23,7 +23,7 @@ export class AuthService {
 
         //    return false
         // }
-        const check = await this.passwordService.PINVerify(username, password);
+        const check = await this.passwordService.PINVerify(password, username);
         if(check.Passwordmatch === false){
             throw new UnauthorizedException();
         }

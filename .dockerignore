@@ -1,5 +1,13 @@
 node_modules
+**/node_modules
 .git
 .vscode
 dist
+**/dist
+.next
+**/.next
+.env
+*.key
+consumer-service/node_modules
+consumer-service/dist
 npm-debug.log*

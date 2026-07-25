@@ -1,0 +1,90 @@
+name: finify
+
+services:
+  producer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      PORT: 5002
+      SSL: "false"
+    ports:
+      - "${PRODUCER_PORT:-5002}:5002"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5002/finify/hello',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  consumer:
+    build:
+      context: ./consumer-service
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: finify_service_consumer
+      KAFKA_CLIENT_ID: finify-service-consumer
+      KAFKA_GROUP_ID: finify-service-consumer
+      KAFKA_TOPICS: ${KAFKA_PRODUCER_TOPIC:-PMNT}
+      KAFKA_FROM_BEGINNING: ${KAFKA_FROM_BEGINNING:-false}
+      SPECIAL_MERCHANT_TYPES: ${SPECIAL_MERCHANT_TYPES:-Special,External}
+      CONSUMER_HTTP_PORT: 5003
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:-finify-local-development-secret-key-change-me}
+      INTEGRATION_ADMIN_API_KEY: ${INTEGRATION_ADMIN_API_KEY:-}
+      MERCHANT_CONFIRMATION_PUBLIC_URL: ${MERCHANT_CONFIRMATION_PUBLIC_URL:-http://localhost:5003/v1/merchant-confirmations}
+    ports:
+      - "${CONSUMER_PORT:-5003}:5003"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5003/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  accounting:
+    build:
+      context: ./accounting-service
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: finify_accounting_service
+      ACCOUNTING_HTTP_PORT: 5004
+      ACCOUNTING_REPORTING_ENTITY: FINIFY_UK
+      ACCOUNTING_AUTO_EOD: ${ACCOUNTING_AUTO_EOD:-false}
+      ACCOUNTING_SCHEDULER_INTERVAL_MS: ${ACCOUNTING_SCHEDULER_INTERVAL_MS:-30000}
+      ACCOUNTING_CATCH_UP_MAX_DAYS_PER_TICK: ${ACCOUNTING_CATCH_UP_MAX_DAYS_PER_TICK:-31}
+      ACCOUNTING_ADMIN_API_KEY: ${ACCOUNTING_ADMIN_API_KEY:-}
+    ports:
+      - "${ACCOUNTING_PORT:-5004}:5004"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5004/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

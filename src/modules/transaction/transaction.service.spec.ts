@@ -8,6 +8,7 @@ import { ProcessTransactionService } from './process-transaction.service';
 import { TransactionRequestService } from './transaction-request.service';
 import { ChargeService } from './charge.service';
 import { CommissionService } from './commission.service';
+import { AmlTransactionService } from './aml-transaction.service';
 
 describe('TransactionService', () => {
   let service: TransactionService;
@@ -16,7 +17,7 @@ describe('TransactionService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         TransactionService,
-        ...[KeywordService, PasswordService, ProcessTransactionService, TransactionRequestService, ChargeService, CommissionService].map(service => ({
+        ...[KeywordService, PasswordService, ProcessTransactionService, TransactionRequestService, ChargeService, CommissionService, AmlTransactionService].map(service => ({
           provide: service,
           useValue: {},
         })),

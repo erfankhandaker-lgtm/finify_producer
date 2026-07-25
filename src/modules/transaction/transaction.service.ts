@@ -15,6 +15,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ChargeService } from './charge.service';
 import { CommissionService } from './commission.service';
+import { AmlTransactionService } from './aml-transaction.service';
 @Injectable()
 export class TransactionService {
   constructor(
@@ -26,6 +27,7 @@ export class TransactionService {
     @InjectRepository(WalletDetail) private readonly walletDetailRepository: Repository<WalletDetail>,
     private readonly chargeService: ChargeService,
     private readonly commissionService: CommissionService,
+    private readonly amlTransactionService: AmlTransactionService,
   ) {}
   create(createTransactionDto: CreateTransactionDto) {
     return 'This action adds a new transaction';
@@ -135,6 +137,42 @@ export class TransactionService {
           commissionid = commissionResult.commissionId;
         }
 
+        let amlReservation = null;
+        if (keywordResponse.keywordExists.isSystemKeyword !== true) {
+          try {
+            amlReservation = await this.amlTransactionService.reserve({
+              transactionId: transactionRequest.transectionId,
+              sourceWallet: createTransactionDto.sourceAccount,
+              keyword: createTransactionDto.keyword,
+              amount: Number(createTransactionDto.amount),
+            });
+          } catch (error) {
+            await this.markTransactionFailed(transactionRequest.transectionId);
+            winstonLog.log(
+              'error',
+              'AML reservation failed for transaction %s: %s',
+              transactionRequest.transectionId,
+              error instanceof Error ? error.message : String(error),
+            );
+            throw error;
+          }
+          if (!amlReservation.success) {
+            await this.markTransactionFailed(transactionRequest.transectionId);
+            winstonLog.log(
+              'warn',
+              'AML reservation rejected transaction %s: %s',
+              transactionRequest.transectionId,
+              amlReservation.statusCode,
+            );
+            return {
+              Responsecode: 980,
+              ResponseDescription: amlReservation.statusMessage,
+              AMLCode: amlReservation.statusCode,
+              TransactionID: transactionRequest.transectionId,
+            };
+          }
+        }
+
         const update: UpdateTransactionRequestDto = {
           transactionId: transactionRequest.transectionId,
           feePayer: chargepay || '0',
@@ -143,13 +181,10 @@ export class TransactionService {
           transactionCommission: commissionResult?.commissionAmount || '0.00',
           transactionStatus: BigInt(2),
         };
-        await this.transactionRequestService.update(update);
-
-        //const update: UpdateTransactionRequestDto = {transactionId: +transactionRequest.transectionId, feePayer:}
-    
-             const message = {Source:createTransactionDto.sourceAccount,
+        const message = {Source:createTransactionDto.sourceAccount,
           Destination:createTransactionDto.destinationAccount,
-          Amount:createTransactionDto.amount,Serice:createTransactionDto.keyword,  
+          Amount:createTransactionDto.amount,Serice:createTransactionDto.keyword,
+          Currency:transactionRequest.currency,
           SourceBalance:userDetails.Amount,
           CHARGERULE:chargeid,
           CHARGEDETAILID: chargeResult?.chargeDetailId || 0,
@@ -174,10 +209,25 @@ export class TransactionService {
           SourceFullname:userDetails.Full_Name,
           TRNSID:transactionRequest.ID,TransactionId:transactionRequest.transectionId,
           referenceId: createTransactionDto.referenceId,
+          AMLReservation: amlReservation ? {
+            status: amlReservation.reservationStatus,
+            walletCode: amlReservation.walletCode,
+          } : { status: 'BYPASSED_SYSTEM_KEYWORD' },
         ...keywordResponse.keywordExists}
         try {
+          await this.transactionRequestService.update(update);
           await this.processTransactionService.sendTransaction(message, createTransactionDto.keyword);
         } catch (error) {
+          if (amlReservation) {
+            await this.amlTransactionService.release(transactionRequest.transectionId).catch((releaseError) => {
+              winstonLog.log(
+                'error',
+                'AML reservation release failed for transaction %s: %s',
+                transactionRequest.transectionId,
+                releaseError instanceof Error ? releaseError.message : String(releaseError),
+              );
+            });
+          }
           await this.markTransactionFailed(transactionRequest.transectionId);
           winstonLog.log('error', 'Kafka submission failed for transaction %s', transactionRequest.transectionId);
           throw error;

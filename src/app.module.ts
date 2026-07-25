@@ -16,6 +16,8 @@ import { RedisModule } from './config/redis/redis.module'
 import { TransactionModule } from './modules/transaction/transaction.module';
 import { RegistrationModule } from './modules/registration/registration.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
+import { ReferenceDataModule } from './modules/reference-data/reference-data.module';
+import { WalletModule } from './modules/wallets/wallet.module';
 
 @Module({
   imports: [
@@ -30,6 +32,8 @@ import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
     TransactionModule,
     RegistrationModule,
     AdminAuthModule,
+    ReferenceDataModule,
+    WalletModule,
   ],
   controllers: [
     AppController,

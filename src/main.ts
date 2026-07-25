@@ -11,18 +11,16 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import fs from 'fs'
 
 async function bootstrap() {
+  const NestFactoryOptions = {logger:  nestwinstonLog}
 
-    //read ssl config....
+  if(process.env.SSL == 'true') {
     const httpsOptions = {
       key: fs.readFileSync('./ssl/keyfile-encrypted.key'),
       cert: fs.readFileSync('./ssl/97580e4c070d1482.crt'),
-      ca: [ fs.readFileSync('./ssl/gd1.crt')],
+      ca: [fs.readFileSync('./ssl/gd1.crt')],
       passphrase: process.env.SSL_KEY_PASSPHRASE,
     }
 
-  const NestFactoryOptions = {logger:  nestwinstonLog}
-
-  if(process.env.SSL == 'true') { 
     //enable ssl..
     NestFactoryOptions['httpsOptions'] = httpsOptions
   }
@@ -50,10 +48,10 @@ async function bootstrap() {
    if(process.env.NODE_ENV != 'production') {
 
     const config = new DocumentBuilder()
-    .setTitle('Auth example')
-    .setDescription('The auth API description')
+    .setTitle('Finify Producer API')
+    .setDescription('Producer, administration, and maker-checker reference-data APIs')
     .setVersion('1.0')
-    .addTag('cats')
+    .addTag('Admin Reference Data - Maker Checker')
     .addBearerAuth(
       { 
         // I was also testing it without prefix 'Bearer ' before the JWT
@@ -80,7 +78,7 @@ async function bootstrap() {
   
     const document = SwaggerModule.createDocument(app, config);
   
-    SwaggerModule.setup('api', app, document);
+    SwaggerModule.setup('api', app, document, { useGlobalPrefix: true });
    }
 
   await app.listen(process.env.PORT || 3000, () => HttpPortLog(process.env.PORT || 3000));
