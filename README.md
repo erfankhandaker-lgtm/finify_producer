@@ -2,13 +2,21 @@
 
 ## Local Docker stack
 
-The repository runs the producer API and transaction consumer in `compose.yaml`. Both services use the existing remote PostgreSQL and Kafka settings from the root `.env` file. Redis is used only by the producer.
+The repository runs the producer, transaction consumer, accounting API, and
+credit-rule decision service in `compose.yaml`. The services use the existing
+PostgreSQL settings from the root `.env` file. Redis is used only by the
+producer.
 
 ```bash
 docker compose up --build
 ```
 
 The producer API is available at `http://localhost:5002/finify`. The root `.env` must provide the database, Redis, and Kafka variables used by the producer. The consumer supports the same encrypted credential format when `IS_CRD_PLAIN=false`.
+
+The dedicated credit-rule service is available at `http://localhost:5005`.
+Apply migration `014_credit_rule_engine.sql` before starting it. Its Swagger UI
+is at `/docs`, and its complete setup and rule examples are documented in
+`credit-rule-service/README.md`.
 
 A NestJS-based payment service producer API with Kafka, Redis, TypeORM, and Docker CI support.
 

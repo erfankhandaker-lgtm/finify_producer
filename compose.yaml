@@ -88,3 +88,33 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  credit-rules:
+    build:
+      context: ./credit-rule-service
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      SERVICE_NAME: finify_credit_rule_service
+      CREDIT_RULE_HTTP_PORT: 5005
+      CREDIT_RULE_ADMIN_API_KEY: ${CREDIT_RULE_ADMIN_API_KEY:-}
+      CREDIT_RULE_EVALUATION_API_KEY: ${CREDIT_RULE_EVALUATION_API_KEY:-}
+      CREDIT_RULE_ALLOWED_SCHEMAS: ${CREDIT_RULE_ALLOWED_SCHEMAS:-public}
+      CREDIT_RULE_HTTP_ALLOWED_HOSTS: ${CREDIT_RULE_HTTP_ALLOWED_HOSTS:-}
+      CREDIT_RULE_ALLOW_INSECURE_HTTP: ${CREDIT_RULE_ALLOW_INSECURE_HTTP:-false}
+    ports:
+      - "${CREDIT_RULE_PORT:-5005}:5005"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5005/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
