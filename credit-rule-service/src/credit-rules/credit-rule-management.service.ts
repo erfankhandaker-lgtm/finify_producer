@@ -221,7 +221,7 @@ export class CreditRuleManagementService {
               effective_from AS "effectiveFrom",effective_to AS "effectiveTo",
               created_by AS "createdBy",created_at AS "createdAt",approved_by AS "approvedBy"
        FROM public.credit_master_rules`,
-      `(rule_code ILIKE $SEARCH OR name ILIKE $SEARCH OR customer_category ILIKE $SEARCH)
+      `("ruleCode" ILIKE $SEARCH OR name ILIKE $SEARCH OR "customerCategory" ILIKE $SEARCH)
        AND ${statusFilter}`,
       query
     );
@@ -644,17 +644,18 @@ export class CreditRuleManagementService {
   private async paginate(base: string, filter: string, query: ListQueryDto) {
     const args: unknown[] = [];
     const searchIndex = args.push(`%${query.search ?? ''}%`);
-    let compiled = filter.replaceAll('$SEARCH',`$${searchIndex}`);
+    let compiled = filter.split('$SEARCH').join(`$${searchIndex}`);
     if (filter.includes('$STATUS')) {
       const statusIndex = args.push(query.status);
-      compiled = compiled.replaceAll('$STATUS',`$${statusIndex}`);
+      compiled = compiled.split('$STATUS').join(`$${statusIndex}`);
     }
     const offset = (query.page - 1) * query.limit;
     const count = await this.dataSource.query(`SELECT count(*)::int AS count FROM (${base}) source WHERE ${compiled}`,args);
     const limitIndex = args.push(query.limit);
     const offsetIndex = args.push(offset);
     const data = await this.dataSource.query(
-      `${base} WHERE ${compiled} ORDER BY 1 DESC LIMIT $${limitIndex} OFFSET $${offsetIndex}`,args
+      `SELECT * FROM (${base}) source WHERE ${compiled}
+       ORDER BY 1 DESC LIMIT $${limitIndex} OFFSET $${offsetIndex}`,args
     );
     return { data,totalRecords: count[0].count,page: query.page,limit: query.limit };
   }

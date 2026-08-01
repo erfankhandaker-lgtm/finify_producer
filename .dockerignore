@@ -6,6 +6,9 @@ dist
 **/dist
 .next
 **/.next
+**/.venv
+**/__pycache__
+**/.pytest_cache
 .env
 *.key
 consumer-service/node_modules

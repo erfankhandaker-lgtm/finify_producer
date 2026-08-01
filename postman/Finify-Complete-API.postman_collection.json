@@ -258,6 +258,11 @@
       "type": "string"
     },
     {
+      "key": "pricingFlowId",
+      "value": "1",
+      "type": "string"
+    },
+    {
       "key": "chargeDetailId",
       "value": "1",
       "type": "string"
@@ -1054,7 +1059,7 @@
               "request": {
                 "method": "GET",
                 "header": [],
-                "url": "{{producerBaseUrl}}/admin/reference-data/keywords?page={{page}}&limit={{limit}}&search=&active=true",
+                "url": "{{producerBaseUrl}}/admin/reference-data/keywords?page={{page}}&limit={{limit}}&search=",
                 "description": "",
                 "auth": {
                   "type": "bearer",
@@ -1285,7 +1290,7 @@
               "request": {
                 "method": "GET",
                 "header": [],
-                "url": "{{producerBaseUrl}}/admin/reference-data/wallet-types?page={{page}}&limit={{limit}}&search=&active=true",
+                "url": "{{producerBaseUrl}}/admin/reference-data/wallet-types?page={{page}}&limit={{limit}}&search=",
                 "description": "",
                 "auth": {
                   "type": "bearer",
@@ -7062,6 +7067,325 @@
               ]
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Admin Operational Gateway",
+      "description": "Administrator-session endpoints used by Finify Command. Service API keys remain server-side.",
+      "auth": {
+        "type": "bearer",
+        "bearer": [
+          {
+            "key": "token",
+            "value": "{{adminAccessToken}}",
+            "type": "string"
+          }
+        ]
+      },
+      "item": [
+        {
+          "name": "Search customer profiles",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/customers?page=1&limit=50&search={{customerId}}"
+          }
+        },
+        {
+          "name": "Get complete customer profile",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/customers/{{customerId}}"
+          }
+        },
+        {
+          "name": "Update customer profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"firstName\": \"Test\",\n  \"lastName\": \"Customer\",\n  \"email\": \"customer@example.com\",\n  \"address\": \"Kampala\",\n  \"kycStatus\": 1\n}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/customers/{{customerId}}"
+          }
+        },
+        {
+          "name": "Change customer operational status",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SUSPENDED\",\n  \"reason\": \"Administrative review\"\n}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/customers/{{customerId}}/status"
+          }
+        },
+        {
+          "name": "Visual Pricing Flows",
+          "description": "Versioned graphical pricing rules with independent charge and commission lanes, each supporting enablement, fixed/flexible conditions, reusable calculations, and one-to-one or many-to-one range connections.",
+          "item": [
+            {
+              "name": "List pricing flows",
+              "request": {
+                "method": "GET",
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows?limit=100"
+              }
+            },
+            {
+              "name": "Create pricing flow draft",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"ruleCode\": \"PMNT_STANDARD\",\n  \"name\": \"Merchant payment pricing\",\n  \"priority\": 100,\n  \"definition\": {\n    \"trigger\": { \"keyword\": \"PMNT\", \"currency\": \"UGX\" },\n    \"route\": { \"sourceWalletType\": 1, \"destinationWalletType\": 2 },\n    \"condition\": { \"minimumAmount\": 0, \"maximumAmount\": 10000000 },\n    \"charge\": {\n      \"enabled\": true,\n      \"mode\": \"FLEXIBLE\",\n      \"type\": \"FIXED\",\n      \"value\": 500,\n      \"payer\": \"S\",\n      \"defaultCalculationId\": \"charge-standard\",\n      \"calculations\": [\n        { \"id\": \"charge-standard\", \"name\": \"Standard charge\", \"type\": \"FIXED\", \"value\": 500 },\n        { \"id\": \"charge-percent\", \"name\": \"Percentage charge\", \"type\": \"PERCENTAGE\", \"value\": 2.5, \"minimum\": 500, \"maximum\": 25000 }\n      ],\n      \"ranges\": [\n        { \"id\": \"charge-range-low\", \"minimumAmount\": 0, \"maximumAmount\": 99999.99, \"chargeCalculationId\": \"charge-standard\" },\n        { \"id\": \"charge-range-high\", \"minimumAmount\": 100000, \"maximumAmount\": 10000000, \"chargeCalculationId\": \"charge-percent\" }\n      ]\n    },\n    \"commission\": {\n      \"enabled\": true,\n      \"mode\": \"FLEXIBLE\",\n      \"type\": \"PERCENTAGE\",\n      \"value\": 0.5,\n      \"minimum\": 100,\n      \"maximum\": 5000,\n      \"receiver\": \"D\",\n      \"defaultCalculationId\": \"commission-standard\",\n      \"calculations\": [\n        { \"id\": \"commission-standard\", \"name\": \"Standard commission\", \"type\": \"PERCENTAGE\", \"value\": 0.5, \"minimum\": 100, \"maximum\": 5000 }\n      ],\n      \"ranges\": [\n        { \"id\": \"commission-range-all\", \"minimumAmount\": 0, \"maximumAmount\": 10000000, \"commissionCalculationId\": \"commission-standard\" }\n      ]\n    },\n    \"settlement\": { \"chargeWalletType\": 113, \"commissionWalletType\": 114 }\n  }\n}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows"
+              },
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "const body = pm.response.json();",
+                      "const data = body.payload || body;",
+                      "if (data.id) pm.collectionVariables.set(\"pricingFlowId\", data.id);"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "Update pricing flow draft",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"Merchant payment pricing — revised\",\n  \"priority\": 90,\n  \"definition\": {\n    \"trigger\": { \"keyword\": \"PMNT\", \"currency\": \"UGX\" },\n    \"route\": { \"sourceWalletType\": 1, \"destinationWalletType\": 2 },\n    \"condition\": { \"minimumAmount\": 0, \"maximumAmount\": 10000000 },\n    \"charge\": { \"mode\": \"FIXED\", \"type\": \"FIXED\", \"value\": 750, \"payer\": \"S\", \"ranges\": [] },\n    \"commission\": { \"enabled\": true, \"type\": \"PERCENTAGE\", \"value\": 0.5, \"minimum\": 100, \"maximum\": 5000, \"receiver\": \"D\" },\n    \"settlement\": { \"chargeWalletType\": 113, \"commissionWalletType\": 114 }\n  }\n}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/{{pricingFlowId}}"
+              }
+            },
+            {
+              "name": "Simulate pricing flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"amount\": \"100000\",\n  \"sourceWalletType\": 1,\n  \"destinationWalletType\": 2,\n  \"definition\": {\n    \"trigger\": { \"keyword\": \"PMNT\", \"keywords\": [\"PMNT\", \"CASH\"], \"currency\": \"UGX\" },\n    \"route\": { \"sourceWalletType\": 1, \"sourceWalletTypes\": [1, 3], \"destinationWalletType\": 2, \"destinationWalletTypes\": [2, 4] },\n    \"condition\": { \"minimumAmount\": 0, \"maximumAmount\": 10000000 },\n    \"charge\": { \"mode\": \"FLEXIBLE\", \"type\": \"PERCENTAGE\", \"value\": 2.5, \"minimum\": 500, \"maximum\": 25000, \"payer\": \"S\", \"ranges\": [{ \"minimumAmount\": 0, \"maximumAmount\": 99999.99, \"type\": \"FIXED\", \"value\": 500 }, { \"minimumAmount\": 100000, \"maximumAmount\": 10000000, \"type\": \"PERCENTAGE\", \"value\": 2.5, \"minimum\": 500, \"maximum\": 25000 }] },\n    \"commission\": { \"enabled\": true, \"type\": \"PERCENTAGE\", \"value\": 0.5, \"minimum\": 100, \"maximum\": 5000, \"receiver\": \"D\" },\n    \"settlement\": { \"chargeWalletType\": 113, \"commissionWalletType\": 114 }\n  }\n}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/simulate"
+              }
+            },
+            {
+              "name": "Submit pricing flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/{{pricingFlowId}}/submit"
+              }
+            },
+            {
+              "name": "Approve pricing flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/{{pricingFlowId}}/approve"
+              }
+            },
+            {
+              "name": "Activate pricing flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/{{pricingFlowId}}/activate"
+              }
+            },
+            {
+              "name": "Retire pricing flow",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "body": {
+                  "mode": "raw",
+                  "raw": "{}"
+                },
+                "url": "{{producerBaseUrl}}/admin/operations/pricing-flows/{{pricingFlowId}}/retire"
+              }
+            }
+          ]
+        },
+        {
+          "name": "List charge configurations",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/charges"
+          }
+        },
+        {
+          "name": "Create charge configuration",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"chargeId\": {{chargeId}},\n  \"chargeType\": 0,\n  \"chargeDescription\": \"Admin configured fixed charge\"\n}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/charges"
+          }
+        },
+        {
+          "name": "Approve charge configuration",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/charges/{{chargeId}}/approve"
+          }
+        },
+        {
+          "name": "List commission configurations",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/commissions"
+          }
+        },
+        {
+          "name": "Create commission configuration",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"commissionId\": {{commissionId}},\n  \"commissionType\": 0,\n  \"description\": \"Admin configured commission\"\n}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/commissions"
+          }
+        },
+        {
+          "name": "List AML activity",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/aml/activity?page=1&limit=100"
+          }
+        },
+        {
+          "name": "List AML cases",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/aml/cases?limit=100"
+          }
+        },
+        {
+          "name": "Open AML case",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceWallet\": \"{{walletId}}\",\n  \"reasonCode\": \"AML_MANUAL_REVIEW\",\n  \"summary\": \"Manual transaction review\",\n  \"riskLevel\": \"HIGH\"\n}"
+            },
+            "url": "{{producerBaseUrl}}/admin/operations/aml/cases"
+          }
+        },
+        {
+          "name": "Credit policies through protected gateway",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/credit/v1/credit-rule-masters?page=1&limit=50"
+          }
+        },
+        {
+          "name": "Accounting EOD runs through protected gateway",
+          "request": {
+            "method": "GET",
+            "url": "{{producerBaseUrl}}/admin/operations/accounting/v1/accounting/eod/runs?limit=100"
+          }
         }
       ]
     }

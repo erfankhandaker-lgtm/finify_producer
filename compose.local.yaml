@@ -1,0 +1,149 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: finify
+      POSTGRES_PASSWORD: finify_local_password
+      POSTGRES_DB: finify
+    ports:
+      - "${LOCAL_POSTGRES_PORT:-5444}:5432"
+    volumes:
+      - finify_local_postgres_data:/var/lib/postgresql/data
+      - ./database/local:/docker-entrypoint-initdb.d:ro
+      - ./database/migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finify -d finify"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:8.6.4-alpine
+    restart: unless-stopped
+    ports:
+      - "${LOCAL_REDIS_PORT:-7025}:6379"
+    volumes:
+      - finify_local_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  kafka:
+    image: apache/kafka:4.3.1
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+    ports:
+      - "${LOCAL_KAFKA_PORT:-9093}:9092"
+    volumes:
+      - finify_local_kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  producer:
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      minio: { condition: service_healthy }
+    environment: &local-service-environment
+      IS_CRD_PLAIN: "true"
+      DB_DIALECT: postgres
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: finify
+      DB_PASS: finify_local_password
+      DB_NAME: finify
+      DB_NAME_DEVELOPMENT: finify
+      DB_NAME_PRODUCTION: finify
+      DB_NAME_TEST: finify
+      DB_SSL: "false"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_USERNAME: ""
+      REDIS_PASS: ""
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_PRODUCER_TOPIC: PMNT
+      JWTKEY: finify-local-jwt-secret-change-before-production
+      ADMIN_JWT_SECRET: finify-local-admin-jwt-secret-change-before-production
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: "9000"
+      MINIO_USE_SSL: "false"
+      MINIO_ACCESS_KEY: finify_local_minio
+      MINIO_SECRET_KEY: finify_local_minio_password_change_me
+      MINIO_TREASURY_BUCKET: finify-treasury-documents
+      MINIO_KYC_BUCKET: finify-kyc-documents
+      KYC_ADMIN_API_KEY: finify-local-kyc-key-change-me
+      ADMIN_MFA_ENCRYPTION_KEY: finify-local-mfa-encryption-key-change-before-production
+      ADMIN_MFA_ISSUER: Finify Local Admin
+      TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+
+  admin-ui:
+    build:
+      args:
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+
+  minio:
+    environment:
+      MINIO_ROOT_USER: finify_local_minio
+      MINIO_ROOT_PASSWORD: finify_local_minio_password_change_me
+
+  consumer:
+    depends_on:
+      postgres: { condition: service_healthy }
+      kafka: { condition: service_healthy }
+      mock-merchant: { condition: service_healthy }
+    environment:
+      <<: *local-service-environment
+      KAFKA_CLIENT_ID: finify-service-consumer
+      KAFKA_GROUP_ID: finify-service-consumer-local
+      KAFKA_TOPICS: PMNT
+      MERCHANT_CONFIRMATION_PUBLIC_URL: http://consumer:5003/v1/merchant-confirmations
+
+  accounting:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *local-service-environment
+
+  credit-rules:
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      <<: *local-service-environment
+      CREDIT_RULE_ALLOWED_SCHEMAS: public
+
+  kyc:
+    depends_on:
+      postgres: { condition: service_healthy }
+      minio: { condition: service_healthy }
+      kyc-ocr: { condition: service_healthy }
+    environment:
+      <<: *local-service-environment
+      KYC_HTTP_PORT: "5006"
+      KYC_OCR_SERVICE_URL: http://kyc-ocr:8000
+
+  kyc-ocr:
+    environment:
+      KYC_ALLOWED_DOCUMENT_HOSTS: minio
+
+volumes:
+  finify_local_postgres_data:
+  finify_local_redis_data:
+  finify_local_kafka_data:

@@ -2,22 +2,45 @@ BEGIN;
 
 -- This verification is deliberately rollback-only. The identifiers are outside
 -- the normal wallet range and no test data or balance change is committed.
-INSERT INTO public."SW_TBL_WALLET" (
-  "Wallet_MSISDN", "Wallet_Code", "Amount", "Status", is_default, "Account_code"
+INSERT INTO public."SW_TBL_WALLET_TYPE" (
+  "Wallet_ID","Wallet_Name","Wallet_Details","Wallet_Type","Status",
+  "Created_By","Created_Date"
 ) VALUES
-  (999900000001, 9901, 1000.00, 0, false, '00000000-0000-0000-0000-000000009901'),
-  (999900000002, 9902, 100.00, 0, false, '00000000-0000-0000-0000-000000009902'),
-  (999900000003, 9903, 500.00, 0, false, '00000000-0000-0000-0000-000000009903'),
-  (999900000004, 9904, 500.00, 0, false, '00000000-0000-0000-0000-000000009904');
+  (9901,'Verification Source','Rollback-only source wallet type',100,true,'MIGRATION_006_VERIFY',CURRENT_TIMESTAMP),
+  (9902,'Verification Destination','Rollback-only destination wallet type',100,true,'MIGRATION_006_VERIFY',CURRENT_TIMESTAMP),
+  (9903,'Verification Charge','Rollback-only charge wallet type',900,true,'MIGRATION_006_VERIFY',CURRENT_TIMESTAMP),
+  (9904,'Verification Commission','Rollback-only commission wallet type',900,true,'MIGRATION_006_VERIFY',CURRENT_TIMESTAMP)
+ON CONFLICT ("Wallet_ID") DO NOTHING;
+
+INSERT INTO public."SW_TBL_WALLET" (
+  "Wallet_MSISDN", "Wallet_Code", "Amount", "Status", is_default, "Account_code",
+  currency, owner_msisdn, owner_type, wallet_purpose
+) VALUES
+  (999900000001, 9901, 1000.00, 0, false, '00000000-0000-0000-0000-000000009901',
+   'BDT', 999900000001, 'CUSTOMER', 'CUSTOMER_MAIN'),
+  (999900000002, 9902, 100.00, 0, false, '00000000-0000-0000-0000-000000009902',
+   'BDT', 999900000002, 'CUSTOMER', 'CUSTOMER_MAIN'),
+  (999900000003, 9903, 500.00, 0, false, '00000000-0000-0000-0000-000000009903',
+   'BDT', 999900000003, 'SYSTEM', 'SYSTEM'),
+  (999900000004, 9904, 500.00, 0, false, '00000000-0000-0000-0000-000000009904',
+   'BDT', 999900000004, 'SYSTEM', 'SYSTEM')
+ON CONFLICT ("Wallet_MSISDN") DO UPDATE SET
+  "Wallet_Code" = EXCLUDED."Wallet_Code",
+  "Amount" = EXCLUDED."Amount",
+  "Status" = EXCLUDED."Status",
+  currency = EXCLUDED.currency,
+  owner_msisdn = EXCLUDED.owner_msisdn,
+  owner_type = EXCLUDED.owner_type,
+  wallet_purpose = EXCLUDED.wallet_purpose;
 
 INSERT INTO public."SW_TBL_TRANSACTION_REQUEST" (
   "Transaction_ID", "Keyword", "Source_Wallet_ID", "Dest_Wallet_ID",
   "Amount", "Transaction_Fee", "Transaction_Comm", "Transaction_Status",
   "Transactionstatus", "Reference_ID", "Currency", "TRNID"
 ) VALUES
-  (999990001, 'PMNT', 999900000001, 999900000002,
+  (9999999001, 'PMNT', 999900000001, 999900000002,
    100.00::money, 2.00::money, 1.00::money, 2, 2, 'VERIFY-DIRECT', 'BDT', 'VERIFY-DIRECT'),
-  (999990002, 'PMNT', 999900000001, 999900000002,
+  (9999999002, 'PMNT', 999900000001, 999900000002,
    100.00::money, 2.00::money, 1.00::money, 2, 2, 'VERIFY-TWO-LEG', 'BDT', 'VERIFY-TWO-LEG');
 
 DO $verify$
@@ -39,7 +62,7 @@ BEGIN
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
     jsonb_build_object(
-      'TransactionId', 999990001,
+      'TransactionId', 9999999001,
       'Source', 999900000001,
       'Destination', 999900000002,
       'Amount', 100.00,
@@ -71,7 +94,7 @@ BEGIN
 
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
-    jsonb_build_object('TransactionId', 999990001, 'TransactionMode', 'DIRECT')
+    jsonb_build_object('TransactionId', 9999999001, 'TransactionMode', 'DIRECT')
   );
   IF v_result.status_code <> 'ALREADY_COMPLETED' THEN
     RAISE EXCEPTION 'Direct idempotency verification failed: %', row_to_json(v_result);
@@ -80,7 +103,7 @@ BEGIN
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
     jsonb_build_object(
-      'TransactionId', 999990001,
+      'TransactionId', 9999999001,
       'TransactionMode', 'DIRECT',
       'TransactionAction', 'REVERSE'
     )
@@ -100,7 +123,7 @@ BEGIN
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
     jsonb_build_object(
-      'TransactionId', 999990002,
+      'TransactionId', 9999999002,
       'Source', 999900000001,
       'Destination', 999900000002,
       'Amount', 100.00,
@@ -124,7 +147,7 @@ BEGIN
 
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
-    jsonb_build_object('TransactionId', 999990002), 'TWO_LEG', 'POST', 2::smallint
+    jsonb_build_object('TransactionId', 9999999002), 'TWO_LEG', 'POST', 2::smallint
   );
   IF NOT v_result.success OR v_result.status_code <> 'COMPLETED' THEN
     RAISE EXCEPTION 'Two-leg settlement verification failed: %', row_to_json(v_result);
@@ -132,7 +155,7 @@ BEGIN
 
   SELECT * INTO v_result
   FROM public.sw_proc_direct_finify_transaction(
-    jsonb_build_object('TransactionId', 999990002), 'TWO_LEG', 'REVERSE', NULL::smallint
+    jsonb_build_object('TransactionId', 9999999002), 'TWO_LEG', 'REVERSE', NULL::smallint
   );
   IF NOT v_result.success OR v_result.status_code <> 'REVERSED' THEN
     RAISE EXCEPTION 'Two-leg reversal verification failed: %', row_to_json(v_result);
@@ -152,7 +175,7 @@ BEGIN
     SELECT 1
     FROM public.sw_tbl_accounting_entry entry_row
     JOIN public.sw_tbl_accounting_journal journal_row ON journal_row.id = entry_row.journal_id
-    WHERE journal_row.transactionid IN (999990001, 999990002)
+    WHERE journal_row.transactionid IN (9999999001, 9999999002)
     GROUP BY entry_row.journal_id
     HAVING sum(entry_row."Debit") <> sum(entry_row."Credit")
   ) THEN

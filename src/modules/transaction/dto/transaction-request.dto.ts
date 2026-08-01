@@ -71,6 +71,14 @@ export class CreateTransactionRequestDto {
   @IsString()
   @IsOptional()
   remarks: string;
+
+  @ApiProperty({
+    description: 'Client-supplied transaction reference.',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  referenceId?: string;
 }
 
 /**

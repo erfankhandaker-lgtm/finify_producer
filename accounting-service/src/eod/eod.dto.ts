@@ -1,4 +1,4 @@
-import { IsBoolean, IsDateString, IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
+import { IsBoolean, IsDateString, IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class RunEodDto {
@@ -25,4 +25,21 @@ export class RunEodBatchDto {
   @IsOptional() @IsString() correlationId?: string;
   @ApiPropertyOptional({ default: false, description: 'Validate all currencies without closing them.' })
   @IsOptional() @IsBoolean() dryRun = false;
+}
+
+export class UpdateEodScheduleDto {
+  @ApiPropertyOptional({ example: 'FINIFY_UK', default: 'FINIFY_UK' })
+  @IsOptional() @IsString() @Matches(/^[A-Za-z0-9_-]{2,32}$/) reportingEntity = 'FINIFY_UK';
+
+  @ApiProperty({ example: true })
+  @IsBoolean() enabled: boolean;
+
+  @ApiProperty({ example: 'Europe/London' })
+  @IsString() @MaxLength(100) businessTimezone: string;
+
+  @ApiProperty({ example: '00:05:00', description: 'Local time when the preceding business date becomes due for close.' })
+  @IsString() @Matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/) closureTime: string;
+
+  @ApiProperty({ example: 'superadmin' })
+  @IsString() @IsNotEmpty() @MaxLength(150) updatedBy: string;
 }

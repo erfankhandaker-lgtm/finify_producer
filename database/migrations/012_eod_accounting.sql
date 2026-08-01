@@ -762,7 +762,7 @@ BEGIN
     v_step_started := clock_timestamp();
     INSERT INTO public.sw_tbl_eod_run_step(run_id,step_name,status,sequence_no,detail)
     VALUES(v_run_id,'SAFEGUARDING_RECONCILIATION',
-      CASE WHEN v_variance=0 OR NOT v_config.strict_safeguarding THEN 'PASSED' ELSE 'FAILED' END,
+      CASE WHEN v_variance>=0 OR NOT v_config.strict_safeguarding THEN 'PASSED' ELSE 'FAILED' END,
       4,jsonb_build_object('masterBalance',v_master_balance,
         'safeguardedLiability',v_safeguarded_liability,'variance',v_variance));
 
@@ -774,8 +774,10 @@ BEGIN
     IF v_variance<>0 THEN
       INSERT INTO public.sw_tbl_eod_exception(run_id,exception_code,severity,message,context)
       VALUES(v_run_id,'SAFEGUARDING_VARIANCE',
-        CASE WHEN v_config.strict_safeguarding THEN 'CRITICAL' ELSE 'WARNING' END,
-        'Master safeguarding balance does not equal safeguarded wallet liabilities',
+        CASE WHEN v_variance<0 AND v_config.strict_safeguarding THEN 'CRITICAL' ELSE 'WARNING' END,
+        CASE WHEN v_variance<0
+          THEN 'Safeguarding balance is below safeguarded wallet liabilities'
+          ELSE 'Safeguarding balance exceeds safeguarded wallet liabilities' END,
         jsonb_build_object('masterBalance',v_master_balance,
           'safeguardedLiability',v_safeguarded_liability,'variance',v_variance));
     END IF;
@@ -794,8 +796,10 @@ BEGIN
     IF v_variance<>0 THEN
       INSERT INTO public.sw_tbl_eod_exception(run_id,exception_code,severity,message,context)
       VALUES(v_run_id,'SAFEGUARDING_VARIANCE',
-        CASE WHEN v_config.strict_safeguarding THEN 'CRITICAL' ELSE 'WARNING' END,
-        'Master safeguarding balance does not equal safeguarded wallet liabilities',
+        CASE WHEN v_variance<0 AND v_config.strict_safeguarding THEN 'CRITICAL' ELSE 'WARNING' END,
+        CASE WHEN v_variance<0
+          THEN 'Safeguarding balance is below safeguarded wallet liabilities'
+          ELSE 'Safeguarding balance exceeds safeguarded wallet liabilities' END,
         jsonb_build_object('masterBalance',v_master_balance,
           'safeguardedLiability',v_safeguarded_liability,'variance',v_variance));
     END IF;

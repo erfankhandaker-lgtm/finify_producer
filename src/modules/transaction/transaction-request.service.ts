@@ -53,7 +53,8 @@ export  class TransactionRequestService {
             destWalletFullname:'',
             pin:'',
             currency:requestedCurrency,
-            remarks:''
+            remarks:'',
+            referenceId: createTransactionDto.referenceId?.trim() || '',
  
    
           

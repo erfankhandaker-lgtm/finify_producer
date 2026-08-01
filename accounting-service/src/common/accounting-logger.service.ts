@@ -15,6 +15,10 @@ export interface AccountingLogContext {
   totals?: Record<string, string | number | null>;
   errorCode?: string;
   errorMessage?: string;
+  enabled?: boolean;
+  businessTimezone?: string;
+  closureTime?: string;
+  requestedBy?: string;
 }
 
 @Injectable()

@@ -12,6 +12,8 @@ export class TrialBalanceService {
     const debit = rows.reduce((sum: number, row: any) => sum + Number(row.total_debit), 0);
     const credit = rows.reduce((sum: number, row: any) => sum + Number(row.total_credit), 0);
     return { businessDate: date, currency: currency.toUpperCase(), reportingEntity: entity,
-      totalDebit: debit.toFixed(2), totalCredit: credit.toFixed(2), balanced: debit === credit, accounts: rows };
+      totalDebit: debit.toFixed(2), totalCredit: credit.toFixed(2),
+      difference: (debit - credit).toFixed(2), balanced: Math.abs(debit - credit) < 0.005,
+      accounts: rows };
   }
 }

@@ -7,7 +7,11 @@ describe('CommissionService', () => {
     ...overrides,
   }) as any;
 
-  const createService = (options: { receiver: 'S' | 'D'; amountType: 'Flat' | 'Perc' }) => {
+  const createService = (options: {
+    receiver: 'S' | 'D';
+    amountType: 'Flat' | 'Perc';
+    visual?: boolean;
+  }) => {
     const commission = repository({
       findOne: jest.fn().mockResolvedValue({
         commissionId: 1,
@@ -44,13 +48,29 @@ describe('CommissionService', () => {
       }]),
     });
     const wallets = repository({
-      find: jest.fn().mockResolvedValue([{ walletMsisdn: '9800000114', walletCode: 114 }]),
+      find: jest.fn().mockResolvedValue([{ walletMsisdn: '9800000114', walletCode: 114, currency: 'UGX' }]),
     });
     const walletTypes = repository({
       findOne: jest.fn().mockResolvedValue({ walletId: 114, walletName: 'Commission Wallet', walletDetails: 'Commission_Wallet' }),
     });
     const cache = { get: jest.fn().mockResolvedValue(null), setEx: jest.fn(), del: jest.fn() };
-    return new CommissionService(commission, details, mappings, keywordCommissions, wallets, walletTypes, cache);
+    const pricingFlows = {
+      findActive: jest.fn().mockResolvedValue(options.visual ? {
+        id: '91',
+        ruleCode: 'PMNT_VISUAL',
+        definition: {
+          commission: { mode: 'FLEXIBLE', type: 'PERCENTAGE', value: 0.5, receiver: options.receiver },
+          settlement: { commissionWalletType: 114 },
+        },
+      } : undefined),
+      simulate: jest.fn().mockReturnValue({
+        commissionReceiver: options.receiver,
+        commissionAmount: '5.00',
+        commissionCalculationType: 'PERCENTAGE',
+        commissionCalculationValue: 0.5,
+      }),
+    };
+    return new CommissionService(commission, details, mappings, keywordCommissions, wallets, walletTypes, cache, pricingFlows as any);
   };
 
   it('credits a fixed commission to the source and debits wallet 114', async () => {
@@ -73,5 +93,29 @@ describe('CommissionService', () => {
     expect(result.sourceCommissionCredit).toBe('0.00');
     expect(result.destinationCommissionCredit).toBe('50.00');
     expect(result.commissionWallet.debitAmount).toBe('50.00');
+  });
+
+  it('uses an active visual pricing flow before legacy configuration', async () => {
+    const result = await createService({
+      receiver: 'D',
+      amountType: 'Perc',
+      visual: true,
+    }).calculate({
+      transactionId: 'TX-VISUAL',
+      keyword: 'PMNT',
+      walletId: 1,
+      amount: '1000',
+      currency: 'UGX',
+    });
+
+    expect(result).toMatchObject({
+      pricingFlowId: '91',
+      pricingRuleCode: 'PMNT_VISUAL',
+      commissionAmount: '5.00',
+      calculationType: 1,
+      commissionValue: '0.50',
+      destinationCommissionCredit: '5.00',
+      commissionWallet: { walletCode: 114 },
+    });
   });
 });

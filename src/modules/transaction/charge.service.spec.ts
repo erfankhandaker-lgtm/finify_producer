@@ -27,12 +27,17 @@ describe('ChargeService', () => {
       return Promise.resolve(1);
     }),
   };
-  const service = new ChargeService(charges as any, details as any, mappings as any, keywordCharges as any, wallets as any, walletTypes as any, cache as any);
+  const pricingFlows = {
+    findActive: jest.fn().mockResolvedValue(undefined),
+    simulate: jest.fn(),
+  };
+  const service = new ChargeService(charges as any, details as any, mappings as any, keywordCharges as any, wallets as any, walletTypes as any, cache as any, pricingFlows as any);
 
   beforeEach(() => {
     jest.clearAllMocks();
+    pricingFlows.findActive.mockResolvedValue(undefined);
     cacheData.clear();
-    wallets.find.mockResolvedValue([{ walletMsisdn: '9800000113', walletCode: 113 }]);
+    wallets.find.mockResolvedValue([{ walletMsisdn: '9800000113', walletCode: 113, currency: 'UGX' }]);
     walletTypes.findOne.mockResolvedValue({ walletId: 113, walletName: 'Charge Wallet', walletDetails: 'Charge_Wallet' });
   });
 
@@ -63,6 +68,56 @@ describe('ChargeService', () => {
       destinationCreditAmount: '950.00',
       payer: 'D',
     });
+  });
+
+  it('uses an active visual pricing flow before legacy configuration', async () => {
+    pricingFlows.findActive.mockResolvedValueOnce({
+      id: '81',
+      ruleCode: 'PMNT_VISUAL',
+      definition: {
+        charge: { type: 'PERCENTAGE', value: 2.5, payer: 'S' },
+        settlement: { chargeWalletType: 113 },
+      },
+    });
+    pricingFlows.simulate.mockReturnValueOnce({
+      chargePayer: 'S',
+      chargeAmount: '25.00',
+      sourceDebitAmount: '1025.00',
+      destinationCreditAmount: '1000.00',
+      chargeCalculationType: 'PERCENTAGE',
+      chargeCalculationValue: 2.5,
+    });
+
+    await expect(service.calculate({
+      transactionId: 'tx-visual',
+      keyword: 'PMNT',
+      walletId: 1,
+      sourceWalletType: 1,
+      destinationWalletType: 2,
+      currency: 'USD',
+      amount: '1000.00',
+    })).resolves.toMatchObject({
+      pricingFlowId: '81',
+      pricingRuleCode: 'PMNT_VISUAL',
+      chargeAmount: '25.00',
+      chargeWallet: { walletCode: 113 },
+    });
+    expect(pricingFlows.findActive).toHaveBeenCalledWith(
+      'PMNT',
+      1,
+      'USD',
+      2,
+    );
+    expect(pricingFlows.simulate).toHaveBeenCalledWith(
+      expect.anything(),
+      '1000.00',
+      1,
+      2,
+    );
+    expect(wallets.find).toHaveBeenCalledWith({
+      where: { walletCode: 113, currency: 'USD' },
+    });
+    expect(keywordCharges.find).not.toHaveBeenCalled();
   });
 
   it('rejects overlapping flexible ranges', async () => {

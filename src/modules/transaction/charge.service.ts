@@ -29,6 +29,7 @@ import {
   UpdateKeywordChargeDto,
 } from './dto/charge.dto';
 import { REDIS_CONNECTION } from '@config/constants';
+import { PricingFlowService } from '../pricing-rules/pricing-flow.service';
 
 Decimal.set({ precision: 30, rounding: Decimal.ROUND_HALF_UP });
 
@@ -44,13 +45,64 @@ export class ChargeService {
     @InjectRepository(SwTblWallet) private readonly wallets: Repository<SwTblWallet>,
     @InjectRepository(SwTblWalletType) private readonly walletTypes: Repository<SwTblWalletType>,
     @Inject(REDIS_CONNECTION) private readonly cache: any,
+    private readonly pricingFlows: PricingFlowService,
   ) {}
 
   async calculate(dto: CalculateChargeDto) {
     const amount = this.money(dto.amount, 'amount');
     if (amount.isNegative() || amount.isZero()) throw new BadRequestException('Transaction amount must be greater than zero');
 
-    const configuration = await this.resolveConfiguration(dto.keyword, dto.walletId);
+    const visualSourceWalletType = dto.sourceWalletType || dto.walletId;
+    const visualFlow = await this.pricingFlows.findActive(
+      dto.keyword,
+      visualSourceWalletType,
+      dto.currency || 'UGX',
+      dto.destinationWalletType,
+    );
+    if (visualFlow) {
+      const result = this.pricingFlows.simulate(
+        visualFlow.definition,
+        dto.amount,
+        dto.destinationWalletType === undefined
+          ? undefined
+          : visualSourceWalletType,
+        dto.destinationWalletType,
+      );
+      const chargeWallet = await this.resolveSystemWallet(
+        visualFlow.definition.settlement.chargeWalletType,
+        dto.currency || 'UGX',
+      );
+      return {
+        transactionId: dto.transactionId,
+        keyword: dto.keyword,
+        walletId: dto.walletId,
+        pricingFlowId: visualFlow.id,
+        pricingRuleCode: visualFlow.ruleCode,
+        chargeId: Number(visualFlow.id),
+        chargeDetailId: Number(visualFlow.id),
+        payer: result.chargePayer,
+        headerChargeType: visualFlow.definition.charge.mode === 'FIXED' ? 0 : 1,
+        calculationType: result.chargeCalculationType === 'FIXED' ? 0 : 1,
+        chargeValue: this.format(this.money(result.chargeCalculationValue, 'chargeValue')),
+        matchedChargeRange: result.matchedChargeRange,
+        chargeAmount: result.chargeAmount,
+        sourceDebitAmount: result.sourceDebitAmount,
+        destinationCreditAmount: result.destinationCreditAmount,
+        chargeWallet: {
+          walletMsisdn: chargeWallet.wallet.walletMsisdn,
+          walletCode: chargeWallet.wallet.walletCode,
+          walletName: chargeWallet.type.walletName,
+          walletDetails: chargeWallet.type.walletDetails,
+          creditAmount: result.chargeAmount,
+        },
+      };
+    }
+
+    const configuration = await this.resolveConfiguration(
+      dto.keyword,
+      dto.walletId,
+      dto.currency || 'UGX',
+    );
     const { keywordCharge, charge, chargeWallet, details } = configuration;
     const detail = this.resolveDetail(charge, amount, details);
     const chargeAmount = this.calculateDetail(detail, amount);
@@ -85,9 +137,10 @@ export class ChargeService {
     };
   }
 
-  private async resolveConfiguration(keyword: string, walletId: number) {
+  private async resolveConfiguration(keyword: string, walletId: number, currency: string) {
+    const normalizedCurrency = currency.trim().toUpperCase();
     const version = await this.cacheGet('charge:config:version') || '1';
-    const key = `charge:config:${version}:${keyword}:${walletId}`;
+    const key = `charge:config:${version}:${keyword}:${walletId}:${normalizedCurrency}`;
     const cached = await this.cacheGet(key);
     if (cached) {
       try { return JSON.parse(cached); } catch { await this.cacheDelete(key); }
@@ -96,7 +149,7 @@ export class ChargeService {
     const existingLoad = this.configurationLoads.get(key);
     if (existingLoad) return existingLoad;
 
-    const load = this.loadConfiguration(keyword, walletId, key);
+    const load = this.loadConfiguration(keyword, walletId, normalizedCurrency, key);
     this.configurationLoads.set(key, load);
     try {
       return await load;
@@ -105,7 +158,12 @@ export class ChargeService {
     }
   }
 
-  private async loadConfiguration(keyword: string, walletId: number, key: string) {
+  private async loadConfiguration(
+    keyword: string,
+    walletId: number,
+    currency: string,
+    key: string,
+  ) {
     const keywordCharge = await this.resolveKeywordCharge(keyword, walletId);
     const [mapping, charge] = await Promise.all([
       this.resolveActiveMapping(keywordCharge.keywordChargeId),
@@ -113,17 +171,28 @@ export class ChargeService {
     ]);
     const [details, chargeWallet] = await Promise.all([
       this.details.find({ where: { chargeId: charge.chargeId } }),
-      this.resolveSystemWallet(113),
+      this.resolveSystemWallet(113, currency),
     ]);
     const configuration = { keywordCharge, mapping, charge, details, chargeWallet };
     await this.cacheSet(key, JSON.stringify(configuration), 300);
     return configuration;
   }
 
-  private async resolveSystemWallet(walletCode: number) {
-    const wallets = await this.wallets.find({ where: { walletCode } });
-    if (!wallets.length) throw new NotFoundException(`System wallet ${walletCode} not found`);
-    if (wallets.length > 1) throw new ConflictException(`Multiple system wallets found for wallet code ${walletCode}`);
+  private async resolveSystemWallet(walletCode: number, currency: string) {
+    const normalizedCurrency = currency.trim().toUpperCase();
+    const wallets = await this.wallets.find({
+      where: { walletCode, currency: normalizedCurrency },
+    });
+    if (!wallets.length) {
+      throw new NotFoundException(
+        `System wallet ${walletCode} not found for ${normalizedCurrency}`,
+      );
+    }
+    if (wallets.length > 1) {
+      throw new ConflictException(
+        `Multiple system wallets found for wallet code ${walletCode} and ${normalizedCurrency}`,
+      );
+    }
     const type = await this.walletTypes.findOne({ where: { walletId: walletCode } });
     if (!type) throw new NotFoundException(`Wallet type ${walletCode} not found`);
     return { wallet: wallets[0], type };

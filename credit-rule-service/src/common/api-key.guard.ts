@@ -21,9 +21,17 @@ abstract class ApiKeyGuard implements CanActivate {
 @Injectable()
 export class AdminApiKeyGuard extends ApiKeyGuard {
   protected readonly configKey = 'CREDIT_RULE_ADMIN_API_KEY';
+
+  constructor(config: ConfigService) {
+    super(config);
+  }
 }
 
 @Injectable()
 export class EvaluationApiKeyGuard extends ApiKeyGuard {
   protected readonly configKey = 'CREDIT_RULE_EVALUATION_API_KEY';
+
+  constructor(config: ConfigService) {
+    super(config);
+  }
 }

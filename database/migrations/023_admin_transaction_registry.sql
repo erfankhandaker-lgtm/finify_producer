@@ -1,0 +1,34 @@
+BEGIN;
+
+CREATE INDEX IF NOT EXISTS "IDX_TRANSACTION_REQUEST_REGISTRY_DATE"
+  ON public."SW_TBL_TRANSACTION_REQUEST"(
+    COALESCE("TransactionDate","Created_Date") DESC,
+    "Transaction_ID" DESC
+  );
+
+CREATE INDEX IF NOT EXISTS "IDX_TRANSACTION_REQUEST_SOURCE_DATE"
+  ON public."SW_TBL_TRANSACTION_REQUEST"(
+    "Source_Wallet_ID",
+    COALESCE("TransactionDate","Created_Date") DESC
+  );
+
+CREATE INDEX IF NOT EXISTS "IDX_TRANSACTION_REQUEST_DEST_DATE"
+  ON public."SW_TBL_TRANSACTION_REQUEST"(
+    "Dest_Wallet_ID",
+    COALESCE("TransactionDate","Created_Date") DESC
+  );
+
+CREATE INDEX IF NOT EXISTS "IDX_TRANSACTION_REQUEST_STATE"
+  ON public."SW_TBL_TRANSACTION_REQUEST"(
+    "Transaction_Status",
+    COALESCE("TransactionDate","Created_Date") DESC
+  );
+
+CREATE INDEX IF NOT EXISTS "IDX_TRANSACTION_REQUEST_REFERENCE_SEARCH"
+  ON public."SW_TBL_TRANSACTION_REQUEST"
+  USING gin (
+    lower(COALESCE("Reference_ID",'')||' '||COALESCE("TRNID",''))
+    gin_trgm_ops
+  );
+
+COMMIT;

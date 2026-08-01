@@ -35,6 +35,16 @@ describe('TransactionRequestService currency controls', () => {
     );
   });
 
+  it('persists the client transaction reference', async () => {
+    walletRepository.findOne
+      .mockResolvedValueOnce({ walletMsisdn: request.sourceAccount, status: 0, currency: 'UGX' })
+      .mockResolvedValueOnce({ walletMsisdn: request.destinationAccount, status: 0, currency: 'UGX' });
+    await service.create({ ...request, referenceId: ' RETAILER-ORDER-1001 ' });
+    expect(transactionRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({ referenceId: 'RETAILER-ORDER-1001' }),
+    );
+  });
+
   it('blocks a normal transfer when wallet currencies differ', async () => {
     walletRepository.findOne
       .mockResolvedValueOnce({ walletMsisdn: request.sourceAccount, status: 0, currency: 'GBP' })

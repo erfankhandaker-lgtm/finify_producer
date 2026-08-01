@@ -18,6 +18,32 @@ Apply migration `014_credit_rule_engine.sql` before starting it. Its Swagger UI
 is at `/docs`, and its complete setup and rule examples are documented in
 `credit-rule-service/README.md`.
 
+Migration `015_credit_scored_customers.sql` adds the wide, column-addressable
+customer scoring profile used by dynamic PostgreSQL credit rules.
+
+### Transaction accounting E2E
+
+The local stack includes a mock merchant on port `5010`. References containing
+`REJECT` return a negative response; other references are approved. The
+consumer posts LEG 1 before calling the mock, posts LEG 2 after approval, and
+creates a compensating reversal after rejection.
+
+To start from a controlled ledger baseline and run the priced test matrix:
+
+```bash
+docker compose -f compose.yaml -f compose.local.yaml exec -T postgres \
+  psql -v ON_ERROR_STOP=1 -U finify -d finify \
+  -f /docker-entrypoint-initdb.d/003_reset_transaction_test_data.sql \
+  -f /docker-entrypoint-initdb.d/004_seed_transaction_e2e.sql
+npm run test:transaction-e2e
+```
+
+The matrix verifies direct payment, two-leg approval, two-leg rejection and
+rollback, full linked merchant refund, refund idempotency, AML finalization,
+non-zero charge/commission capture, balanced journals, and final wallet
+balances. The reset script is local-only and restores wallet effects from the
+existing accounting entries before clearing transactional tables.
+
 A NestJS-based payment service producer API with Kafka, Redis, TypeORM, and Docker CI support.
 
 ## Overview
@@ -233,6 +259,19 @@ npm run dev
 The UI runs at `http://localhost:3100` by default. Set
 `NEXT_PUBLIC_API_URL` when the API is hosted somewhere other than
 `http://localhost:5002/finify`.
+
+### Customer and business portal
+
+The mobile-first Next.js portal is in `portal-ui` and runs at
+`http://localhost:3200`. Personal customers and business merchants use their
+registered MSISDN and wallet PIN. The portal provides real wallet balances,
+IBAN/SWIFT details, ledger activity, recipient verification, priced payments,
+KYC/business status, and PIN changes through protected `/finify/portal`
+endpoints.
+
+Apply `database/migrations/036_business_portal_identity.sql` to enable merchant
+portal identities. The portal is included in Docker Compose and reported as an
+independent application in Command Center System Pulse.
 
 ## Merchant integration consumer API
 

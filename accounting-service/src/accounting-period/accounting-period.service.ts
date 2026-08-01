@@ -6,7 +6,7 @@ export class AccountingPeriodService {
   constructor(private readonly dataSource: DataSource) {}
   list(reportingEntity: string, limit: number) {
     return this.dataSource.query(
-      `SELECT id::text,reporting_entity AS "reportingEntity",business_date AS "businessDate",
+      `SELECT id::text,reporting_entity AS "reportingEntity",to_char(business_date,'YYYY-MM-DD') AS "businessDate",
               currency,status,close_version AS "closeVersion",opened_at AS "openedAt",
               closing_started_at AS "closingStartedAt",closed_at AS "closedAt",closed_by AS "closedBy"
        FROM public.sw_tbl_accounting_period WHERE reporting_entity=$1

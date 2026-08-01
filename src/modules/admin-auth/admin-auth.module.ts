@@ -4,8 +4,12 @@ import { PassportModule } from '@nestjs/passport';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { decrypt } from '@helpers/cipher';
 import { AdminAuthController } from './admin-auth.controller';
+import { AdminAccessController } from './admin-access.controller';
+import { AdminAccessService } from './admin-access.service';
 import { AdminAuthGuard } from './admin-auth.guard';
 import { AdminAuthService } from './admin-auth.service';
+import { AdminBiometricService } from './admin-biometric.service';
+import { AdminMfaService } from './admin-mfa.service';
 import { AdminJwtStrategy } from './admin-jwt.strategy';
 import { AdminPermissionsGuard } from './permissions.guard';
 import {
@@ -35,8 +39,16 @@ const adminJwtSecret = () => {
       AdminSession,
     ]),
   ],
-  controllers: [AdminAuthController],
-  providers: [AdminAuthService, AdminJwtStrategy, AdminAuthGuard, AdminPermissionsGuard],
+  controllers: [AdminAuthController, AdminAccessController],
+  providers: [
+    AdminAuthService,
+    AdminBiometricService,
+    AdminMfaService,
+    AdminAccessService,
+    AdminJwtStrategy,
+    AdminAuthGuard,
+    AdminPermissionsGuard,
+  ],
   exports: [AdminAuthGuard, AdminPermissionsGuard],
 })
 export class AdminAuthModule {}

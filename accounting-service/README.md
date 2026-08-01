@@ -29,9 +29,9 @@ Swagger is available at `/docs`.
 - `GET /v1/accounting/reconciliation/safeguarding`
 - `GET /v1/accounting/my/statement`
 
-Trial balance, balance sheet, and income statement rows can also be downloaded
-from the corresponding `.csv` endpoints. All report queries validate ISO dates,
-currency codes, reporting entities, and date-range ordering.
+Trial balance, balance sheet, income statement, and account-statement entries can
+also be downloaded from the corresponding `.csv` endpoints. All report queries
+validate ISO dates, currency codes, reporting entities, and date-range ordering.
 
 Administrative routes use `x-admin-api-key`. The self-statement route validates the
 same bearer JWT issued by the producer and derives the wallet from the token.

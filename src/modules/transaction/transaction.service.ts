@@ -91,6 +91,21 @@ export class TransactionService {
         return { Responsecode: 401, ResponseDescription: 'Password verification failed' };
       }
       else{
+        const sourceWalletType = Number(userDetails.Wallet_Code);
+        const destinationWalletType = Number(destinationuser.Wallet_Code);
+        if (
+          !Number.isInteger(sourceWalletType) ||
+          sourceWalletType <= 0 ||
+          !Number.isInteger(destinationWalletType) ||
+          destinationWalletType <= 0
+        ) {
+          await this.markTransactionFailed(transactionRequest.transectionId);
+          return {
+            Responsecode: 422,
+            ResponseDescription:
+              'Source and destination wallet types are required for pricing',
+          };
+        }
         let chargepay = '';
         let commission = '';
         let chargeid = 0;
@@ -110,6 +125,9 @@ export class TransactionService {
               transactionId: transactionRequest.transectionId,
               keyword: createTransactionDto.keyword,
               walletId,
+              sourceWalletType,
+              destinationWalletType,
+              currency: transactionRequest.currency,
               amount: String(createTransactionDto.amount),
             });
           } catch (error) {
@@ -128,7 +146,15 @@ export class TransactionService {
             return { Responsecode: 422, ResponseDescription: 'Valid wallet ID is required for commission calculation' };
           }
           try {
-            commissionResult = await this.commissionService.calculate({ transactionId: transactionRequest.transectionId, keyword: createTransactionDto.keyword, walletId, amount: String(createTransactionDto.amount) });
+            commissionResult = await this.commissionService.calculate({
+              transactionId: transactionRequest.transectionId,
+              keyword: createTransactionDto.keyword,
+              walletId,
+              sourceWalletType,
+              destinationWalletType,
+              currency: transactionRequest.currency,
+              amount: String(createTransactionDto.amount),
+            });
           } catch (error) {
             await this.markTransactionFailed(transactionRequest.transectionId);
             throw error;

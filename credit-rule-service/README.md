@@ -18,7 +18,8 @@ credit decisions. It listens on port `5005`.
 
 ## Setup
 
-Apply `database/migrations/014_credit_rule_engine.sql`, configure the values in
+Apply `database/migrations/014_credit_rule_engine.sql` followed by
+`database/migrations/015_credit_scored_customers.sql`, configure the values in
 `.env.example`, then:
 
 ```bash
@@ -29,6 +30,30 @@ npm run start:dev
 
 Swagger UI is at `http://localhost:5005/docs`; OpenAPI JSON is at
 `http://localhost:5005/docs-json`.
+
+To transactionally load or refresh a tab-separated scoring export by `_id`,
+run this command from the repository root:
+
+```bash
+node scripts/load-credit-scored-customers.js /absolute/path/to/scored-customers.tsv
+```
+
+The loader validates every row and target data type, derives
+`customer_category` from `score_grade` or `band`, and rolls back the complete
+import if any row is invalid.
+
+For development end-to-end testing, missing active customer profiles and
+zero-balance main wallets can then be provisioned idempotently:
+
+```bash
+E2E_CUSTOMER_PIN=replace-with-a-test-pin \
+E2E_CUSTOMER_WALLET_CURRENCY=UGX \
+node scripts/provision-scored-customer-wallets.js
+```
+
+The provisioner never changes an existing profile, wallet, PIN, or balance.
+New wallets receive verified type `103` or unverified type `111` based on the
+scored KYC status, and every created wallet receives an operational audit row.
 
 Administration routes use `CREDIT_RULE_ADMIN_API_KEY`. Production decision
 routes use `CREDIT_RULE_EVALUATION_API_KEY`. Send the selected value in

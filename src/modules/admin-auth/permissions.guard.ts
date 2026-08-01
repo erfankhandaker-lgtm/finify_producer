@@ -14,6 +14,7 @@ export class AdminPermissionsGuard implements CanActivate {
     ]);
     if (!required?.length) return true;
     const user = context.switchToHttp().getRequest().user as AdminTokenPayload;
+    if (user?.roles?.includes('super_admin')) return true;
     if (!required.every((permission) => user?.permissions?.includes(permission))) {
       throw new ForbiddenException('You do not have permission to perform this action');
     }

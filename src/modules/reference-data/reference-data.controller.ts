@@ -32,6 +32,7 @@ import {
   ReferenceListQueryDto,
   RejectChangeDto,
   ReviewChangeDto,
+  SimulateAmlConfigurationDto,
   UpdateAmlConfigurationDto,
   UpdateKeywordDto,
   UpdateWalletTypeDto,
@@ -135,6 +136,13 @@ export class ReferenceDataController {
   @ApiResponse({ status: 201, description: 'Pending CREATE request created; live AML limits are unchanged.' })
   createAmlConfiguration(@Body() dto: CreateAmlConfigurationDto, @Req() request: AdminRequest) {
     return this.service.createAmlConfiguration(dto, request.user);
+  }
+
+  @Post('aml-configurations/simulate')
+  @RequirePermissions('reference_data.read')
+  @ApiOperation({ summary: 'Simulate AML limit evaluation without reserving capacity or changing live data' })
+  simulateAmlConfiguration(@Body() dto: SimulateAmlConfigurationDto) {
+    return this.service.simulateAmlConfiguration(dto);
   }
 
   @Patch('aml-configurations/:walletCode/:keyword')

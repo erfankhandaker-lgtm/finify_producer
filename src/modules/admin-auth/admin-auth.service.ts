@@ -7,6 +7,7 @@ import { DataSource, Repository } from 'typeorm';
 import { AdminLoginDto, InitializeAdminDto } from './dto/admin-login.dto';
 import { AdminSession, AdminUser, AdminUserStatus } from './entities';
 import { AdminRequestContext, AdminTokenPayload } from './admin-auth.types';
+import { AdminMfaService } from './admin-mfa.service';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_MINUTES = 15;
@@ -19,6 +20,7 @@ export class AdminAuthService {
     @InjectRepository(AdminSession) private readonly sessions: Repository<AdminSession>,
     private readonly jwtService: JwtService,
     private readonly dataSource: DataSource,
+    private readonly mfa: AdminMfaService,
   ) {}
 
   async setupStatus() {
@@ -70,6 +72,7 @@ export class AdminAuthService {
   }
 
   async login(input: AdminLoginDto, context: AdminRequestContext) {
+    await this.mfa.verifyCaptcha(input.captchaToken, context);
     const user = await this.users
       .createQueryBuilder('user')
       .addSelect('user.passwordHash')
@@ -96,10 +99,28 @@ export class AdminAuthService {
     user.failedLoginAttempts = 0;
     user.lockedUntil = null;
     user.status = AdminUserStatus.ACTIVE;
-    user.lastLoginAt = new Date();
     await this.users.save(user);
 
-    return this.createSession(user, context);
+    return this.mfa.beginLogin(user.id, context);
+  }
+
+  startMfaEnrollment(challengeId: string, context: AdminRequestContext) {
+    return this.mfa.startEnrollment(challengeId, context);
+  }
+
+  async confirmMfaEnrollment(challengeId: string, code: string, context: AdminRequestContext) {
+    const result = await this.mfa.confirmEnrollment(challengeId, code, context);
+    const session = await this.completeMfaLogin(result.userId, context);
+    return { ...session, recoveryPin: result.recoveryPin, recoveryPinShownOnce: true };
+  }
+
+  async verifyMfa(challengeId: string, code: string, context: AdminRequestContext) {
+    const result = await this.mfa.verify(challengeId, code, context);
+    return this.completeMfaLogin(result.userId, context);
+  }
+
+  recoverMfa(challengeId: string, recoveryPin: string, context: AdminRequestContext) {
+    return this.mfa.recover(challengeId, recoveryPin, context);
   }
 
   async refresh(refreshToken: string, context: AdminRequestContext) {
@@ -178,6 +199,19 @@ export class AdminAuthService {
       }),
     );
     return this.tokenResponse(user, id, secret);
+  }
+
+  private async completeMfaLogin(userId: string, context: AdminRequestContext) {
+    const user = await this.users.findOne({
+      where: { id: userId, status: AdminUserStatus.ACTIVE },
+      relations: { userRoles: { role: { rolePermissions: { permission: true } } } },
+    });
+    if (!user) throw this.invalidCredentials();
+    user.failedLoginAttempts = 0;
+    user.lockedUntil = null;
+    user.lastLoginAt = new Date();
+    await this.users.save(user);
+    return this.createSession(user, context);
   }
 
   private async tokenResponse(user: AdminUser, sessionId: string, refreshSecret: string) {

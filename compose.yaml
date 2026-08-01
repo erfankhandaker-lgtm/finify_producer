@@ -1,6 +1,67 @@
 name: finify
 
 services:
+  portal-ui:
+    build:
+      context: ./portal-ui
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: 3200
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_URL: http://localhost:${PRODUCER_PORT:-5002}/finify
+      NEXT_PUBLIC_SITE_URL: http://localhost:${PORTAL_UI_PORT:-3200}
+    ports:
+      - "${PORTAL_UI_PORT:-3200}:3200"
+    depends_on:
+      producer:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:3200',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  admin-ui:
+    build:
+      context: ./admin-ui
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: 3100
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_URL: http://localhost:${PRODUCER_PORT:-5002}/finify
+      NEXT_PUBLIC_CREDIT_RULE_API_URL: http://localhost:${CREDIT_RULE_PORT:-5005}
+      NEXT_PUBLIC_ACCOUNTING_API_URL: http://localhost:${ACCOUNTING_PORT:-5004}
+      NEXT_PUBLIC_CONSUMER_API_URL: http://localhost:${CONSUMER_PORT:-5003}
+      NEXT_PUBLIC_SITE_URL: http://localhost:${ADMIN_UI_PORT:-3100}
+    ports:
+      - "${ADMIN_UI_PORT:-3100}:3100"
+    depends_on:
+      producer:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:3100',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
   producer:
     build:
       context: .
@@ -13,6 +74,27 @@ services:
     environment:
       PORT: 5002
       SSL: "false"
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-finify-minio-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
+      MINIO_TREASURY_BUCKET: ${MINIO_TREASURY_BUCKET:-finify-treasury-documents}
+      MINIO_ADMIN_BIOMETRIC_BUCKET: ${MINIO_ADMIN_BIOMETRIC_BUCKET:-finify-admin-biometric}
+      ADMIN_FACE_MATCH_THRESHOLD: ${ADMIN_FACE_MATCH_THRESHOLD:-45}
+      CREDIT_RULE_SERVICE_URL: http://credit-rules:5005
+      ACCOUNTING_SERVICE_URL: http://accounting:5004
+      CONSUMER_SERVICE_URL: http://consumer:5003
+      MOCK_MERCHANT_SERVICE_URL: http://mock-merchant:5010
+      ADMIN_UI_SERVICE_URL: http://admin-ui:3100
+      PORTAL_UI_SERVICE_URL: http://portal-ui:3200
+      KYC_SERVICE_URL: http://kyc:5006
+      KYC_OCR_SERVICE_URL: http://kyc-ocr:8000
+      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-finify-local-kyc-key-change-me}
+      ADMIN_MFA_ENCRYPTION_KEY: ${ADMIN_MFA_ENCRYPTION_KEY:-}
+      ADMIN_MFA_ISSUER: ${ADMIN_MFA_ISSUER:-Finify Admin}
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "${PRODUCER_PORT:-5002}:5002"
     healthcheck:
@@ -25,6 +107,24 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-finify-minio-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
+    ports:
+      - "${MINIO_API_PORT:-9010}:9000"
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"
+    volumes:
+      - finify_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   consumer:
     build:
@@ -58,6 +158,28 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  mock-merchant:
+    build:
+      context: ./mock-merchant-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      MOCK_MERCHANT_PORT: 5010
+      MOCK_MERCHANT_TIMEOUT_DELAY_MS: ${MOCK_MERCHANT_TIMEOUT_DELAY_MS:-5000}
+    ports:
+      - "${MOCK_MERCHANT_PORT:-5010}:5010"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5010/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   accounting:
     build:
@@ -118,3 +240,64 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  kyc:
+    build:
+      context: ./kyc-service
+      dockerfile: Dockerfile
+      target: runtime
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      KYC_HTTP_PORT: 5006
+      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-finify-local-kyc-key-change-me}
+      KYC_OCR_SERVICE_URL: http://kyc-ocr:8000
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
+      MINIO_PORT: ${MINIO_PORT:-9000}
+      MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-finify-minio-admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
+      MINIO_KYC_BUCKET: ${MINIO_KYC_BUCKET:-finify-kyc-documents}
+    ports:
+      - "${KYC_PORT:-5006}:5006"
+    depends_on:
+      minio:
+        condition: service_healthy
+      kyc-ocr:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - require('http').get('http://localhost:5006/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  kyc-ocr:
+    build:
+      context: ./kyc-ocr-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    environment:
+      KYC_ALLOWED_DOCUMENT_HOSTS: minio
+    ports:
+      - "${KYC_OCR_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+volumes:
+  finify_minio_data:

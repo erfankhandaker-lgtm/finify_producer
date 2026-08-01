@@ -1,7 +1,8 @@
 BEGIN;
 
 ALTER TABLE public."SW_TBL_PROFILE_MERCHANT"
-  ADD COLUMN IF NOT EXISTS "Integration_Channel" varchar(10);
+  ADD COLUMN IF NOT EXISTS "Integration_Channel" varchar(10),
+  ADD COLUMN IF NOT EXISTS "Is_Special_Merchant" boolean NOT NULL DEFAULT false;
 
 DO $migration$
 BEGIN

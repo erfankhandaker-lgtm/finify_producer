@@ -16,11 +16,12 @@ import { ChargeController } from './charge.controller';
 import { CommissionService } from './commission.service';
 import { CommissionController } from './commission.controller';
 import { AmlTransactionService } from './aml-transaction.service';
+import { PricingFlowModule } from '../pricing-rules/pricing-flow.module';
 
 @Module({
   controllers: [TransactionController, ChargeController, CommissionController],
   providers: [TransactionService,KeywordService, PasswordService, ProcessTransactionService,TransactionRequestService, ChargeService, CommissionService, AmlTransactionService],
   exports:[TransactionService,KeywordService,PasswordService, ProcessTransactionService,TransactionRequestService, ChargeService, CommissionService, AmlTransactionService],
-  imports:[DatabaseModule, RedisModule,KafkaModule, TypeOrmModule.forFeature([SwTblKeyword, WalletDetail, SwViewAllUser, TransactionRequest, SwTblTransactionEntry, SwTblCharge, SwTblChargeDetail, SwTblChargeMapping, SwTblKeywordCharge, SwTblCommission, SwTblCommissionDetail, SwTblCommissionMapping, SwTblKeywordCommission, SwTblWallet, SwTblWalletType])]
+  imports:[DatabaseModule, RedisModule,KafkaModule, PricingFlowModule, TypeOrmModule.forFeature([SwTblKeyword, WalletDetail, SwViewAllUser, TransactionRequest, SwTblTransactionEntry, SwTblCharge, SwTblChargeDetail, SwTblChargeMapping, SwTblKeywordCharge, SwTblCommission, SwTblCommissionDetail, SwTblCommissionMapping, SwTblKeywordCommission, SwTblWallet, SwTblWalletType])]
 })
 export class TransactionModule {}

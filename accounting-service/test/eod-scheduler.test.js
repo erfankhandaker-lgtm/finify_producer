@@ -22,7 +22,15 @@ function scheduler({ periodState, outcomes = [] }) {
       return outcomes.shift() ?? { status: 'CLOSED' };
     },
   };
-  const dataSource = { query: async () => [periodState] };
+  const dataSource = {
+    query: async sql => {
+      if (sql.includes('UPDATE public.sw_tbl_eod_schedule SET') && sql.includes('RETURNING')) {
+        return [{ reportingEntity: 'FINIFY_UK', enabled: true, businessTimezone: 'Europe/London', closureTime: '00:05:00' }];
+      }
+      if (sql.includes('FROM public.sw_tbl_accounting_period')) return [periodState];
+      return [];
+    },
+  };
   const accountingLog = { info() {}, error() {} };
   return {
     calls,
@@ -34,11 +42,12 @@ test('catches up every overdue date oldest-first after downtime', async () => {
   const { service, calls } = scheduler({
     periodState: { lastClosed: '2026-07-21', earliestOpen: null },
   });
-  await service.runCatchUp(new Date('2026-07-25T00:05:00Z'));
+  const result = await service.runCatchUp(new Date('2026-07-25T00:05:00Z'));
   assert.deepEqual(calls.map(call => call.businessDate), [
     '2026-07-22', '2026-07-23', '2026-07-24',
   ]);
   assert.ok(calls.every(call => call.requestedBy === 'EOD_CATCH_UP_SCHEDULER'));
+  assert.equal(result.status, 'COMPLETED');
 });
 
 test('stops catch-up when an earlier date is blocked', async () => {
@@ -46,6 +55,7 @@ test('stops catch-up when an earlier date is blocked', async () => {
     periodState: { lastClosed: '2026-07-21', earliestOpen: null },
     outcomes: [{ status: 'BLOCKED' }],
   });
-  await service.runCatchUp(new Date('2026-07-25T00:05:00Z'));
+  const result = await service.runCatchUp(new Date('2026-07-25T00:05:00Z'));
   assert.deepEqual(calls.map(call => call.businessDate), ['2026-07-22']);
+  assert.equal(result.status, 'BLOCKED');
 });

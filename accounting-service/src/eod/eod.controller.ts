@@ -1,15 +1,37 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiSecurity, ApiTags } from '@nestjs/swagger';
 import { AdminApiGuard } from '../common/admin-api.guard';
-import { RunEodBatchDto, RunEodDto } from './eod.dto';
+import { RunEodBatchDto, RunEodDto, UpdateEodScheduleDto } from './eod.dto';
 import { EodOrchestrationService } from './eod-orchestration.service';
+import { EodSchedulerService } from './eod-scheduler.service';
 
 @ApiTags('End of day')
 @ApiSecurity('admin-api-key')
 @UseGuards(AdminApiGuard)
 @Controller('v1/accounting/eod')
 export class EodController {
-  constructor(private readonly orchestration: EodOrchestrationService) {}
+  constructor(
+    private readonly orchestration: EodOrchestrationService,
+    private readonly scheduler: EodSchedulerService,
+  ) {}
+
+  @Get('schedule')
+  @ApiOperation({ summary: 'Get automatic EOD schedule, next close, and per-currency close status' })
+  schedule(@Query('reportingEntity') reportingEntity = 'FINIFY_UK') {
+    return this.scheduler.getSchedule(reportingEntity);
+  }
+
+  @Patch('schedule')
+  @ApiOperation({ summary: 'Set the persistent daily business closure time and timezone' })
+  updateSchedule(@Body() dto: UpdateEodScheduleDto) {
+    return this.scheduler.updateSchedule(dto);
+  }
+
+  @Post('schedule/run-now')
+  @ApiOperation({ summary: 'Run the due-date scheduler immediately without changing its daily schedule' })
+  runScheduleNow(@Body() body: { reportingEntity?: string } = {}) {
+    return this.scheduler.runCatchUp(new Date(), true, body.reportingEntity || 'FINIFY_UK');
+  }
 
   @Post('dry-run')
   @ApiOperation({ summary: 'Validate one currency without creating snapshots or closing the period' })

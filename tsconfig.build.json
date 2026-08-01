@@ -1,4 +1,17 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["admin-ui", "consumer-service", "node_modules", "test", "dist", "**/*spec.ts"]
+  "exclude": [
+    "admin-ui",
+    "portal-ui",
+    "accounting-service",
+    "consumer-service",
+    "credit-rule-service",
+    "kyc-service",
+    "kyc-ocr-service",
+    "mock-merchant-service",
+    "node_modules",
+    "test",
+    "dist",
+    "**/*spec.ts"
+  ]
 }

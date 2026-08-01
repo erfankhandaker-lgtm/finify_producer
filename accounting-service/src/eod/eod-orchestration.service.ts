@@ -58,24 +58,71 @@ export class EodOrchestrationService {
     dryRun: boolean; correlationId?: string;
   }) {
     const correlationId = input.correlationId ?? randomUUID();
-    const configs = await this.configurations.activeCurrencies(input.reportingEntity);
-    const results: Array<{ currency: string; result?: unknown; error?: string }> = [];
-    for (const config of configs) {
+    const currencies = await this.configurations.currencyUniverse(input.reportingEntity);
+    const results: Array<{
+      currency: string;
+      configured: boolean;
+      status: 'READY' | 'CLOSED' | 'BLOCKED' | 'FAILED';
+      result?: unknown;
+      error?: string;
+    }> = [];
+    for (const currency of currencies) {
+      if (!currency.configured) {
+        results.push({
+          currency: currency.currency,
+          configured: false,
+          status: 'BLOCKED',
+          error: 'ACCOUNTING_CONFIGURATION_MISSING',
+        });
+        continue;
+      }
       try {
         const result = await this.runOne({
-          ...input, currency: config.currency, correlationId: `${correlationId}:${config.currency}`,
+          ...input,
+          currency: currency.currency,
+          correlationId: `${correlationId}:${currency.currency}`,
         });
-        results.push({ currency: config.currency, result });
+        const successful = result.readyForClose;
+        results.push({
+          currency: currency.currency,
+          configured: true,
+          status: successful ? (input.dryRun ? 'READY' : 'CLOSED') : 'BLOCKED',
+          result,
+        });
       } catch (error) {
-        results.push({ currency: config.currency, error: error instanceof Error ? error.message : String(error) });
+        const detail = error instanceof ConflictException
+          ? 'EOD_READINESS_FAILED'
+          : error instanceof Error ? error.message : String(error);
+        results.push({
+          currency: currency.currency,
+          configured: true,
+          status: 'FAILED',
+          error: detail,
+        });
       }
     }
+    const successful = results.filter(item => item.status === (input.dryRun ? 'READY' : 'CLOSED')).length;
+    const status = successful === results.length && results.length > 0
+      ? 'COMPLETED'
+      : successful > 0 ? 'PARTIAL' : 'FAILED';
+    await this.dataSource.query(
+      `UPDATE public.sw_tbl_eod_batch
+       SET status=$3,completed_at=CURRENT_TIMESTAMP
+       WHERE reporting_entity=$1 AND business_date=$2::date`,
+      [input.reportingEntity, input.businessDate, status],
+    );
     return {
       correlationId,
       businessDate: input.businessDate,
       reportingEntity: input.reportingEntity,
-      status: results.every(item => item.result) ? 'COMPLETED'
-        : results.some(item => item.result) ? 'PARTIAL' : 'FAILED',
+      dryRun: input.dryRun,
+      status,
+      summary: {
+        expected: results.length,
+        successful,
+        blocked: results.filter(item => item.status === 'BLOCKED').length,
+        failed: results.filter(item => item.status === 'FAILED').length,
+      },
       currencies: results,
     };
   }
@@ -83,7 +130,7 @@ export class EodOrchestrationService {
   listRuns(limit: number) {
     return this.dataSource.query(
       `SELECT run.id::text,run.batch_id::text AS "batchId",run.reporting_entity AS "reportingEntity",
-              run.business_date AS "businessDate",run.currency,run.run_version AS "runVersion",
+              to_char(run.business_date,'YYYY-MM-DD') AS "businessDate",run.currency,run.run_version AS "runVersion",
               run.dry_run AS "dryRun",run.status,run.total_debit::numeric AS "totalDebit",
               run.total_credit::numeric AS "totalCredit",run.journal_count::int AS "journalCount",
               run.entry_count::int AS "entryCount",run.wallet_count::int AS "walletCount",

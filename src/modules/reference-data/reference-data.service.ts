@@ -16,6 +16,7 @@ import {
   CreateKeywordDto,
   CreateWalletTypeDto,
   ReferenceListQueryDto,
+  SimulateAmlConfigurationDto,
   UpdateAmlConfigurationDto,
   UpdateKeywordDto,
   UpdateWalletTypeDto,
@@ -225,6 +226,90 @@ export class ReferenceDataService {
     return this.queue('AML', this.amlKey(dto.walletCode, keyword), 'CREATE', null, proposed, makerComment, actor);
   }
 
+  async simulateAmlConfiguration(dto: SimulateAmlConfigurationDto) {
+    const keyword = this.keywordKey(dto.keyword);
+    await this.validateAmlReferences(this.dataSource.manager, dto.walletCode, keyword);
+    const limits = this.amlPayload(dto);
+    this.assertAmlLimits(limits);
+
+    const transactionAmount = Number(dto.transactionAmount);
+    const dailyAmountUsed = Number(dto.dailyAmountUsed ?? 0);
+    const dailyTransactionUsed = Number(dto.dailyTransactionUsed ?? 0);
+    const monthlyAmountUsed = Number(dto.monthlyAmountUsed ?? 0);
+    const monthlyTransactionUsed = Number(dto.monthlyTransactionUsed ?? 0);
+    const projected = {
+      dailyAmount: Number((dailyAmountUsed + transactionAmount).toFixed(2)),
+      dailyTransactionCount: dailyTransactionUsed + 1,
+      monthlyAmount: Number((monthlyAmountUsed + transactionAmount).toFixed(2)),
+      monthlyTransactionCount: monthlyTransactionUsed + 1,
+    };
+    const checks = [
+      {
+        code: 'MAX_TRANSACTION',
+        label: 'Maximum transaction amount',
+        used: transactionAmount,
+        limit: Number(dto.maxTransactionAmount),
+        statusCode: 'AML_MAX_TRANSACTION_EXCEEDED',
+        statusMessage: 'Maximum transaction amount exceeded',
+      },
+      {
+        code: 'DAILY_AMOUNT',
+        label: 'Daily AML amount limit',
+        used: projected.dailyAmount,
+        limit: Number(dto.dailyMaxAmount),
+        statusCode: 'AML_DAILY_AMOUNT_EXCEEDED',
+        statusMessage: 'Daily AML amount limit exceeded',
+      },
+      {
+        code: 'DAILY_COUNT',
+        label: 'Daily AML transaction count',
+        used: projected.dailyTransactionCount,
+        limit: Number(dto.dailyTransactionCount),
+        statusCode: 'AML_DAILY_COUNT_EXCEEDED',
+        statusMessage: 'Daily AML transaction count exceeded',
+      },
+      {
+        code: 'MONTHLY_AMOUNT',
+        label: 'Monthly AML amount limit',
+        used: projected.monthlyAmount,
+        limit: Number(dto.monthlyMaxAmount),
+        statusCode: 'AML_MONTHLY_AMOUNT_EXCEEDED',
+        statusMessage: 'Monthly AML amount limit exceeded',
+      },
+      {
+        code: 'MONTHLY_COUNT',
+        label: 'Monthly AML transaction count',
+        used: projected.monthlyTransactionCount,
+        limit: Number(dto.monthlyTransactionCount),
+        statusCode: 'AML_MONTHLY_COUNT_EXCEEDED',
+        statusMessage: 'Monthly AML transaction count exceeded',
+      },
+    ].map((check) => ({
+      ...check,
+      passed: check.used <= check.limit,
+      remaining: Number(Math.max(0, check.limit - check.used).toFixed(2)),
+    }));
+    const failed = checks.find((check) => !check.passed);
+    return {
+      success: !failed,
+      decision: failed ? 'BLOCK' : 'PASS',
+      statusCode: failed?.statusCode ?? 'AML_LIMITS_PASSED',
+      statusMessage: failed?.statusMessage ?? 'AML limits passed; simulation did not reserve capacity',
+      walletCode: dto.walletCode,
+      keyword,
+      transactionAmount,
+      currentUsage: {
+        dailyAmount: dailyAmountUsed,
+        dailyTransactionCount: dailyTransactionUsed,
+        monthlyAmount: monthlyAmountUsed,
+        monthlyTransactionCount: monthlyTransactionUsed,
+      },
+      projectedUsage: projected,
+      checks,
+      readOnly: true,
+    };
+  }
+
   async updateAmlConfiguration(walletCode: number, keyword: string, dto: UpdateAmlConfigurationDto, actor: AdminTokenPayload) {
     const key = this.amlKey(walletCode, keyword);
     const current = await this.amlSnapshot(this.dataSource.manager, key);
@@ -310,13 +395,15 @@ export class ReferenceDataService {
   }
 
   async reject(id: string, reason: string, actor: AdminTokenPayload) {
+    const superAdmin = actor.roles?.includes('super_admin');
     const rows = await this.dataSource.query(
       `UPDATE public.reference_data_change_requests
        SET status='REJECTED',checker_user_id=$2::bigint,checker_username=$3,
            checker_comment=$4,decided_at=CURRENT_TIMESTAMP
-       WHERE id=$1::bigint AND status='PENDING' AND maker_user_id<>$2::bigint
+       WHERE id=$1::bigint AND status='PENDING'
+         AND ($5::boolean OR maker_user_id<>$2::bigint)
        RETURNING *`,
-      [id, actor.sub, actor.username, reason],
+      [id, actor.sub, actor.username, reason, superAdmin],
     );
     if (rows[0]) return this.publicRequest(rows[0]);
     const request = await this.requestRow(id);
@@ -352,6 +439,15 @@ export class ReferenceDataService {
         const current = await this.snapshot(manager, resource, key);
         if (action === 'CREATE' && current) throw new ConflictException('Record already exists');
         if (action !== 'CREATE' && !current) throw new NotFoundException('Record not found');
+        if (action !== 'CREATE') {
+          const unchanged = await manager.query(
+            `SELECT $1::jsonb = $2::jsonb AS same`,
+            [JSON.stringify(current), JSON.stringify(proposed)],
+          );
+          if (unchanged[0]?.same === true) {
+            throw new ConflictException('No changes detected; an identical rule already exists');
+          }
+        }
         const pending = await manager.query(
           `SELECT id FROM public.reference_data_change_requests
            WHERE resource_type=$1 AND resource_key=$2 AND status='PENDING'`, [resource, key],
@@ -395,7 +491,7 @@ export class ReferenceDataService {
     const rows = await manager.query(
       `SELECT jsonb_build_object(
          'walletId',"Wallet_ID",'walletName',"Wallet_Name",'walletDetails',"Wallet_Details",
-         'isKycNeeded',COALESCE("Is_Kyc_Needed",0),'defaultCommissionId',"Default_Comission_Id",
+         'isKycNeeded',COALESCE("Is_Kyc_Needed",false),'defaultCommissionId',"Default_Comission_Id",
          'defaultChargeId',"Default_Charge_Id",'walletType',"Wallet_Type",'isCharge',COALESCE("Is_Charge",false),
          'fee',"Fee"::numeric,'hierarchy',"Hierarchy",'status',COALESCE("Status",false),
          'walletNameLocal',"Wallet_Name_Local"
@@ -578,7 +674,7 @@ export class ReferenceDataService {
   }
 
   private walletTypeDefaults(walletId: number): Snapshot {
-    return { walletId,walletName:null,walletDetails:null,isKycNeeded:0,defaultCommissionId:1,defaultChargeId:1,
+    return { walletId,walletName:null,walletDetails:null,isKycNeeded:false,defaultCommissionId:1,defaultChargeId:1,
       walletType:100,isCharge:true,fee:null,hierarchy:null,status:false,walletNameLocal:null };
   }
 
@@ -607,7 +703,10 @@ export class ReferenceDataService {
   }
 
   private assertDifferentUser(request: any, actor: AdminTokenPayload) {
-    if (String(request.maker_user_id) === String(actor.sub)) {
+    if (
+      String(request.maker_user_id) === String(actor.sub) &&
+      !actor.roles?.includes('super_admin')
+    ) {
       throw new ForbiddenException('Maker cannot approve or reject their own change request');
     }
   }

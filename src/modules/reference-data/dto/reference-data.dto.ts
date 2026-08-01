@@ -15,6 +15,11 @@ import {
 
 const trim = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim() : value;
 const upper = ({ value }: { value: unknown }) => typeof value === 'string' ? value.trim().toUpperCase() : value;
+const booleanish = ({ value }: { value: unknown }) => {
+  if (value === 1 || value === '1' || value === 'true') return true;
+  if (value === 0 || value === '0' || value === 'false') return false;
+  return value;
+};
 
 export class CreateKeywordDto {
   @ApiProperty({ example: 'PMNT', minLength: 1, maxLength: 5 })
@@ -67,7 +72,7 @@ export class CreateWalletTypeDto {
   @ApiProperty({ example: 200 }) @Type(() => Number) @IsInt() @Min(1) walletId: number;
   @ApiProperty({ example: 'Merchant wallet', maxLength: 50 }) @Transform(trim) @IsString() @IsNotEmpty() @MaxLength(50) walletName: string;
   @ApiPropertyOptional({ maxLength: 50 }) @Transform(trim) @IsOptional() @IsString() @MaxLength(50) walletDetails?: string;
-  @ApiPropertyOptional({ enum: [0, 1], default: 0 }) @Type(() => Number) @IsOptional() @IsIn([0, 1]) isKycNeeded?: number;
+  @ApiPropertyOptional({ default: false }) @Transform(booleanish) @IsOptional() @IsBoolean() isKycNeeded?: boolean;
   @ApiPropertyOptional({ minimum: 1, default: 1 }) @Type(() => Number) @IsOptional() @IsInt() @Min(1) defaultCommissionId?: number;
   @ApiPropertyOptional({ minimum: 1, default: 1 }) @Type(() => Number) @IsOptional() @IsInt() @Min(1) defaultChargeId?: number;
   @ApiPropertyOptional({ example: 200, description: 'Broad wallet class used by transaction routing.' }) @Type(() => Number) @IsOptional() @IsInt() @Min(1) walletType?: number;
@@ -121,6 +126,31 @@ export class CreateAmlConfigurationDto {
 export class UpdateAmlConfigurationDto extends PartialType(
   OmitType(CreateAmlConfigurationDto, ['walletCode', 'keyword'] as const),
 ) {}
+
+export class SimulateAmlConfigurationDto extends OmitType(
+  CreateAmlConfigurationDto,
+  ['isActive', 'makerComment'] as const,
+) {
+  @ApiProperty({ example: 1000, minimum: 0.01 })
+  @Type(() => Number) @IsNumber({ maxDecimalPlaces: 2 }) @Min(0.01)
+  transactionAmount: number;
+
+  @ApiPropertyOptional({ example: 5000, minimum: 0, default: 0 })
+  @Type(() => Number) @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0)
+  dailyAmountUsed?: number;
+
+  @ApiPropertyOptional({ example: 5, minimum: 0, default: 0 })
+  @Type(() => Number) @IsOptional() @IsInt() @Min(0)
+  dailyTransactionUsed?: number;
+
+  @ApiPropertyOptional({ example: 40000, minimum: 0, default: 0 })
+  @Type(() => Number) @IsOptional() @IsNumber({ maxDecimalPlaces: 2 }) @Min(0)
+  monthlyAmountUsed?: number;
+
+  @ApiPropertyOptional({ example: 40, minimum: 0, default: 0 })
+  @Type(() => Number) @IsOptional() @IsInt() @Min(0)
+  monthlyTransactionUsed?: number;
+}
 
 export class ReviewChangeDto {
   @ApiPropertyOptional({ description: 'Checker comment recorded in the audit history.' })

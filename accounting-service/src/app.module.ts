@@ -10,6 +10,7 @@ import { EodModule } from './eod/eod.module';
 import { FinancialStatementsModule } from './financial-statements/financial-statements.module';
 import { HealthController } from './health.controller';
 import { ReconciliationModule } from './reconciliation/reconciliation.module';
+import { AccountingReportModule } from './reporting/accounting-report.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ReconciliationModule } from './reconciliation/reconciliation.module';
     FinancialStatementsModule,
     AccountStatementsModule,
     ReconciliationModule,
+    AccountingReportModule,
   ],
   controllers: [HealthController],
 })

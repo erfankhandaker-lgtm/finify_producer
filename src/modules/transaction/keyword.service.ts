@@ -92,12 +92,13 @@ async checkwalletdetails(keyworddto: KeywordDto){
           };
         }
         else{
-            const AMLCHECK = await this.DB.query(
-              'SELECT * FROM sw_proc_aml_check_app($1, $2, $3, $4)',
-              [keyworddto.sourceaccount, keyworddto.keyword, keyworddto.amount, keyworddto.destinationaccount],
-            );
-
-            winstonLog.log('info', 'AML Check Result: %s', JSON.stringify(AMLCHECK));
+            // The legacy sw_proc_aml_check_app function is intentionally no
+            // longer used. AmlTransactionService performs the authoritative,
+            // concurrency-safe reservation immediately before Kafka dispatch.
+            const AMLCHECK = [{
+              code: 100,
+              msg: 'AML eligibility passed; transactional reservation required',
+            }];
             return {AMLCHECK, ...walletCheck, keywordExists};
         }
        }

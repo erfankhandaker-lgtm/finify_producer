@@ -4,6 +4,7 @@ import {
   IsDateString,
   IsIn,
   IsInt,
+  Matches,
   IsNotEmpty,
   IsNumberString,
   IsOptional,
@@ -82,5 +83,8 @@ export class CalculateChargeDto {
   @IsString() @IsNotEmpty() transactionId: string;
   @IsString() @IsNotEmpty() keyword: string;
   @Type(() => Number) @IsInt() @Min(1) walletId: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) sourceWalletType?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) destinationWalletType?: number;
+  @IsOptional() @IsString() @Matches(/^[A-Za-z]{3}$/) currency?: string;
   @IsNumberString() amount: string;
 }

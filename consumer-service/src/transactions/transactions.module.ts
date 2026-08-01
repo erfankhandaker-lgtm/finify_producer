@@ -13,10 +13,12 @@ import { MerchantConfirmationService } from './merchant-confirmation.service';
 import { MerchantDispatchService } from './merchant-dispatch.service';
 import { DisputeController } from './dispute.controller';
 import { AmlSummaryService } from './aml-summary.service';
+import { MerchantRefundController } from './merchant-refund.controller';
+import { MerchantRefundService } from './merchant-refund.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([TransactionRequest])],
-  controllers: [IntegrationConfigController, MerchantConfirmationController, DisputeController],
+  controllers: [IntegrationConfigController, MerchantConfirmationController, DisputeController, MerchantRefundController],
   providers: [
     TransactionReaderService,
     FieldMappingService,
@@ -27,6 +29,7 @@ import { AmlSummaryService } from './aml-summary.service';
     MerchantConfirmationService,
     IntegrationAdminGuard,
     AmlSummaryService,
+    MerchantRefundService,
   ],
   exports: [TransactionReaderService],
 })

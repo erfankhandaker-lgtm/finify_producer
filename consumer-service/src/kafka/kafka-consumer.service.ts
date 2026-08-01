@@ -16,6 +16,11 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
   private readonly topics: string[];
   private readonly fromBeginning: boolean;
   private stopping = false;
+  private starting = false;
+  private ready = false;
+  private recoveryTimer: NodeJS.Timeout | null = null;
+  private lastError: string | null = null;
+  private lastGroupJoinAt: string | null = null;
 
   constructor(
     config: ConfigService,
@@ -36,6 +41,22 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
     this.consumer = kafka.consumer({
       groupId: config.getOrThrow<string>('KAFKA_GROUP_ID'),
     });
+
+    this.consumer.on(this.consumer.events.GROUP_JOIN, () => {
+      this.ready = true;
+      this.lastError = null;
+      this.lastGroupJoinAt = new Date().toISOString();
+    });
+    this.consumer.on(this.consumer.events.CRASH, (event) => {
+      this.ready = false;
+      this.lastError = this.errorMessage(event.payload.error);
+      this.logger.error(`Kafka consumer crashed: ${this.lastError}`);
+      if (!event.payload.restart) this.scheduleRecovery();
+    });
+    this.consumer.on(this.consumer.events.DISCONNECT, () => {
+      this.ready = false;
+      if (!this.stopping) this.scheduleRecovery();
+    });
   }
 
   onApplicationBootstrap(): void {
@@ -43,16 +64,19 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
   }
 
   private async startWithRetry(): Promise<void> {
-    while (!this.stopping) {
+    if (this.starting || this.stopping) return;
+    this.starting = true;
+    while (!this.stopping && !this.ready) {
       try {
         await this.start();
-        return;
+        break;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.logger.error(`Kafka consumer startup failed; retrying in 5 seconds: ${message}`);
+        this.lastError = this.errorMessage(error);
+        this.logger.error(`Kafka consumer startup failed; retrying in 5 seconds: ${this.lastError}`);
         await new Promise((resolve) => setTimeout(resolve, 5000));
       }
     }
+    this.starting = false;
   }
 
   private async start(): Promise<void> {
@@ -71,7 +95,36 @@ export class KafkaConsumerService implements OnApplicationBootstrap, OnApplicati
 
   async onApplicationShutdown(): Promise<void> {
     this.stopping = true;
+    if (this.recoveryTimer) clearTimeout(this.recoveryTimer);
     await this.consumer.disconnect().catch(() => undefined);
+  }
+
+  health() {
+    return {
+      ready: this.ready,
+      status: this.ready ? 'connected' : this.starting ? 'connecting' : 'disconnected',
+      topics: [...this.topics],
+      lastGroupJoinAt: this.lastGroupJoinAt,
+      lastError: this.lastError,
+    };
+  }
+
+  private scheduleRecovery(): void {
+    if (this.stopping || this.recoveryTimer) return;
+    this.recoveryTimer = setTimeout(() => {
+      this.recoveryTimer = null;
+      if (this.ready || this.stopping) return;
+      void this.reconnect();
+    }, 5000);
+  }
+
+  private async reconnect(): Promise<void> {
+    await this.consumer.disconnect().catch(() => undefined);
+    await this.startWithRetry();
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private async handleMessage({ topic, partition, message }: EachMessagePayload): Promise<void> {

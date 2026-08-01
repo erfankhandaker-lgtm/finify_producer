@@ -18,6 +18,8 @@ import { RegistrationModule } from './modules/registration/registration.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { ReferenceDataModule } from './modules/reference-data/reference-data.module';
 import { WalletModule } from './modules/wallets/wallet.module';
+import { AdminOperationsModule } from './modules/admin-operations/admin-operations.module';
+import { PortalModule } from './modules/portal/portal.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { WalletModule } from './modules/wallets/wallet.module';
     AdminAuthModule,
     ReferenceDataModule,
     WalletModule,
+    AdminOperationsModule,
+    PortalModule,
   ],
   controllers: [
     AppController,

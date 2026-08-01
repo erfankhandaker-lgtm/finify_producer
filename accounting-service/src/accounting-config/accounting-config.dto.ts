@@ -24,3 +24,22 @@ export class CreateAccountingConfigDto {
   @ApiProperty({ example: 'checker.user', description: 'Must differ from maker.' })
   @IsString() @IsNotEmpty() checker: string;
 }
+
+export class ProvisionCurrencyDto {
+  @ApiProperty({ example: 'EUR' })
+  @IsString() @Matches(/^[A-Za-z]{3}$/) currency: string;
+  @ApiPropertyOptional({ example: 'GBP', default: 'GBP' })
+  @IsOptional() @IsString() @Matches(/^[A-Za-z]{3}$/) baseCurrency = 'GBP';
+  @ApiPropertyOptional({ example: 'FINIFY_UK', default: 'FINIFY_UK' })
+  @IsOptional() @IsString() @Matches(/^[A-Za-z0-9_-]{2,32}$/) reportingEntity = 'FINIFY_UK';
+  @ApiPropertyOptional({ example: 'Europe/London', default: 'Europe/London' })
+  @IsOptional() @IsString() @MaxLength(100) businessTimezone = 'Europe/London';
+  @ApiPropertyOptional({ example: '00:00:00', default: '00:00:00' })
+  @IsOptional() @IsString() @Matches(/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/) cutoffTime = '00:00:00';
+  @ApiProperty({ example: '2026-08-01' })
+  @IsDateString() effectiveFrom: string;
+  @ApiProperty({ example: 'maker.user' })
+  @IsString() @IsNotEmpty() requestedBy: string;
+  @ApiProperty({ example: 'checker.user' })
+  @IsString() @IsNotEmpty() approvedBy: string;
+}

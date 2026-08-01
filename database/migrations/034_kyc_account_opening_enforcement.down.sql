@@ -1,0 +1,14 @@
+BEGIN;
+
+DROP TRIGGER IF EXISTS "TRG_CUSTOMER_WALLET_KYC" ON public."SW_TBL_WALLET";
+DROP FUNCTION IF EXISTS public.sw_fn_enforce_wallet_kyc();
+
+DROP TABLE IF EXISTS public.customer_account_opening_requests;
+
+ALTER TABLE public.customer_profile_operation_audit
+  DROP CONSTRAINT IF EXISTS "CK_CUSTOMER_PROFILE_AUDIT_OPERATION";
+ALTER TABLE public.customer_profile_operation_audit
+  ADD CONSTRAINT "CK_CUSTOMER_PROFILE_AUDIT_OPERATION"
+  CHECK (operation IN ('CUSTOMER_CREATE','STATUS_CHANGE','PROFILE_UPDATE','KYC_UPDATE'));
+
+COMMIT;
