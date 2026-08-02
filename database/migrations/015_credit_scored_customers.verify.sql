@@ -34,9 +34,10 @@ BEGIN
   FROM information_schema.columns
   WHERE table_schema='public' AND table_name='credit_scored_customers';
 
-  IF actual_columns <> 274 THEN
+  -- Later additive migrations may extend the table (018 adds profile_msisdn).
+  IF actual_columns < 274 THEN
     RAISE EXCEPTION
-      'credit_scored_customers should have 274 columns, found %',
+      'credit_scored_customers should have at least 274 columns, found %',
       actual_columns;
   END IF;
 

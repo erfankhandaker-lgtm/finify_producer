@@ -157,7 +157,7 @@ export class KycService {
     try {
       await client.query('BEGIN');
       const locked = await client.query(
-        `SELECT status,created_by,customer_msisdn
+        `SELECT status,created_by,customer_msisdn,document_type,extracted_data
          FROM kyc.cases WHERE id=$1::uuid FOR UPDATE`,
         [id],
       );
@@ -186,22 +186,61 @@ export class KycService {
          WHERE id=$1::uuid`,
         [id, status, input.reason.trim(), actor],
       );
-      const profileStatus = input.action === 'APPROVE' ? 1 : input.action === 'REJECT' ? 2 : 0;
+      const approved = await client.query(
+        `SELECT id FROM kyc.cases
+         WHERE customer_msisdn=$1::bigint AND status='APPROVED'
+         ORDER BY reviewed_at DESC NULLS LAST,created_at DESC LIMIT 1`,
+        [locked.rows[0].customer_msisdn],
+      );
+      const approvedCaseId = approved.rows[0]?.id || null;
+      const profileStatus = approvedCaseId ? 1 : input.action === 'REJECT' ? 2 : 0;
+      const verified = this.verifiedProfileFields(
+        locked.rows[0].extracted_data,
+        locked.rows[0].document_type,
+      );
+      const previousProfile = await client.query(
+        `SELECT "First_Name" AS "firstName","Last_Name" AS "lastName",
+                "ID_Type" AS "idType","ID_Number" AS "idNumber",
+                "Gender" AS gender,"DOB"::text AS dob,"Address" AS address,
+                "KYC_Status" AS "kycStatus","KYC_Case_ID" AS "kycCaseId",
+                "KYC_Verified_Date" AS "kycVerifiedAt","KYC_Verified_By" AS "kycVerifiedBy"
+         FROM public."SW_TBL_PROFILE_CUST" WHERE "MSISDN"=$1::bigint FOR UPDATE`,
+        [locked.rows[0].customer_msisdn],
+      );
       const profile = await client.query(
         `UPDATE public."SW_TBL_PROFILE_CUST"
-         SET "KYC_Status"=$2,"Modified_By"=$3,"Modified_Date"=CURRENT_TIMESTAMP
+         SET "KYC_Status"=$2,
+             "First_Name"=CASE WHEN $4::boolean THEN COALESCE($5,"First_Name") ELSE "First_Name" END,
+             "Last_Name"=CASE WHEN $4::boolean THEN COALESCE($6,"Last_Name") ELSE "Last_Name" END,
+             "ID_Type"=CASE WHEN $4::boolean THEN COALESCE($7,"ID_Type") ELSE "ID_Type" END,
+             "ID_Number"=CASE WHEN $4::boolean THEN COALESCE($8,"ID_Number") ELSE "ID_Number" END,
+             "Gender"=CASE WHEN $4::boolean THEN COALESCE($9,"Gender") ELSE "Gender" END,
+             "DOB"=CASE WHEN $4::boolean THEN COALESCE($10::date,"DOB") ELSE "DOB" END,
+             "Address"=CASE WHEN $4::boolean THEN COALESCE($11,"Address") ELSE "Address" END,
+             "KYC_Case_ID"=CASE WHEN $4::boolean THEN $12::uuid ELSE "KYC_Case_ID" END,
+             "KYC_Verified_Date"=CASE WHEN $4::boolean THEN CURRENT_TIMESTAMP ELSE "KYC_Verified_Date" END,
+             "KYC_Verified_By"=CASE WHEN $4::boolean THEN $3 ELSE "KYC_Verified_By" END,
+             "Modified_By"=$3,"Modified_Date"=CURRENT_TIMESTAMP
          WHERE "MSISDN"=$1::bigint
-         RETURNING "KYC_Status" AS "kycStatus"`,
-        [locked.rows[0].customer_msisdn, profileStatus, actor],
+         RETURNING "First_Name" AS "firstName","Last_Name" AS "lastName",
+                   "ID_Type" AS "idType","ID_Number" AS "idNumber",
+                   "Gender" AS gender,"DOB"::text AS dob,"Address" AS address,
+                   "KYC_Status" AS "kycStatus","KYC_Case_ID" AS "kycCaseId",
+                   "KYC_Verified_Date" AS "kycVerifiedAt","KYC_Verified_By" AS "kycVerifiedBy"`,
+        [locked.rows[0].customer_msisdn, profileStatus, actor,
+          input.action === 'APPROVE', verified.firstName || null, verified.lastName || null,
+          locked.rows[0].document_type || null, verified.idNumber || null,
+          verified.gender || null, verified.dateOfBirth || null, verified.address || null, id],
       );
       if (profile.rows[0]) {
         await client.query(
           `INSERT INTO public.customer_profile_operation_audit(
              customer_msisdn,operation,previous_state,new_state,reason,actor_id)
-           VALUES($1::bigint,'KYC_UPDATE',NULL,$2::jsonb,$3,$4)`,
+           VALUES($1::bigint,'KYC_UPDATE',$2::jsonb,$3::jsonb,$4,$5)`,
           [
             locked.rows[0].customer_msisdn,
-            JSON.stringify({ kycStatus: profileStatus, caseId: id, caseStatus: status }),
+            JSON.stringify(previousProfile.rows[0] || null),
+            JSON.stringify(profile.rows[0]),
             `KYC case ${status.toLowerCase()}: ${input.reason.trim()}`,
             actor,
           ],
@@ -213,9 +252,9 @@ export class KycService {
          WHERE customer_msisdn=$1::bigint AND status<>'OPENED'`,
         [
           locked.rows[0].customer_msisdn,
-          input.action === 'APPROVE' ? 'READY_TO_OPEN'
+          approvedCaseId ? 'READY_TO_OPEN'
             : input.action === 'REJECT' ? 'KYC_REJECTED' : 'PENDING_KYC',
-          id,
+          approvedCaseId || id,
         ],
       );
       await this.audit(client, id, input.action, locked.rows[0].status, status, input.reason.trim(), actor);
@@ -359,6 +398,33 @@ export class KycService {
        VALUES($1::uuid,$2,$3,$4,$5,$6)`,
       [caseId, action, previous, next, reason, actor],
     );
+  }
+
+  private verifiedProfileFields(extracted: unknown, documentType: unknown) {
+    const data = extracted && typeof extracted === 'object'
+      ? extracted as Record<string, unknown>
+      : {};
+    const text = (value: unknown, max: number) => {
+      const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+      return normalized ? normalized.slice(0, max) : undefined;
+    };
+    const genderValue = String(data.gender || '').trim().toUpperCase();
+    const gender = genderValue === 'M' || genderValue === 'MALE'
+      ? 'M'
+      : genderValue === 'F' || genderValue === 'FEMALE' ? 'F' : undefined;
+    const dateValue = String(data.dateOfBirth || data.dob || '').trim();
+    const dateOfBirth = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])$/.test(dateValue)
+      ? dateValue
+      : undefined;
+    return {
+      firstName: text(data.firstName || data.givenNames, 100),
+      lastName: text(data.lastName || data.surname, 100),
+      idNumber: text(data.idNumber || data.documentNumber, 100),
+      gender,
+      dateOfBirth,
+      address: text(data.address, 500),
+      documentType: text(documentType, 40),
+    };
   }
 
   private async screenName(name: unknown) {

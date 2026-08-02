@@ -6,6 +6,7 @@ import { Repository } from 'typeorm';
 import { decrypt } from '@helpers/cipher';
 import { AdminSession, AdminUserStatus } from './entities';
 import { AdminTokenPayload } from './admin-auth.types';
+import { ADMIN_ACCESS_COOKIE, cookieToken } from '../../helpers/session-cookie';
 
 const adminJwtSecret = () => {
   const value = process.env.ADMIN_JWT_SECRET || process.env.JWTKEY;
@@ -18,7 +19,10 @@ export class AdminJwtStrategy extends PassportStrategy(Strategy, 'admin-jwt') {
     @InjectRepository(AdminSession) private readonly sessions: Repository<AdminSession>,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        (request) => cookieToken(request, ADMIN_ACCESS_COOKIE),
+      ]),
       ignoreExpiration: false,
       secretOrKey: adminJwtSecret(),
     });

@@ -2,16 +2,16 @@
 
 import {
   ArrowDownLeft, ArrowRight, ArrowUpRight, BriefcaseBusiness, Building2,
-  Check, ChevronRight, CircleUserRound, Eye, EyeOff, Fingerprint,
+  Camera, Check, ChevronRight, CircleUserRound, Eye, EyeOff, FileCheck2, Fingerprint,
   History, Home, Landmark, LoaderCircle, LockKeyhole, LogOut, Menu,
-  ReceiptText, RefreshCw, Send, ShieldCheck, Smartphone, WalletCards, X,
+  ReceiptText, RefreshCw, ScanFace, Send, ShieldCheck, Smartphone, UploadCloud, WalletCards, X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { sessionFetch } from '../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
-const TOKEN_KEY = 'finify_portal_token';
 
-type Tab = 'home' | 'wallets' | 'pay' | 'activity' | 'profile';
+type Tab = 'home' | 'wallets' | 'pay' | 'activity' | 'kyc' | 'profile';
 type Principal = {
   accountType: 'CUSTOMER' | 'BUSINESS'; ownerType: string; ownerMsisdn: string;
   displayName: string; email?: string; status: number; kycStatus?: number; businessType?: string;
@@ -30,17 +30,30 @@ type Service = { keyword: string; description?: string; scope?: string };
 type Dashboard = {
   principal: Principal; wallets: Wallet[]; balances: Record<string, number>;
   recentActivity: Activity[]; kyc?: { status: string; systemRecommendation?: string } | null;
+  kycRequired: boolean; kycComplete: boolean;
   services: Service[];
 };
 
-async function api<T>(path: string, token?: string, init?: { method?: string; body?: unknown }): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
+type KycJourney = {
+  required: boolean;
+  complete: boolean;
+  case: {
+    id: string; status: string; documentType: string; issuingCountry: string;
+    systemRecommendation?: string; faceMatchScore?: number | string;
+    screeningSummary?: Record<string, unknown>; finalReason?: string;
+    documents: Array<{ role: string; originalName: string; createdAt: string }>;
+  } | null;
+};
+
+async function api<T>(path: string, token?: string, init?: { method?: string; body?: Record<string, unknown> | FormData }): Promise<T> {
+  const multipart = init?.body instanceof FormData;
+  const requestBody: BodyInit | undefined = init?.body === undefined
+    ? undefined
+    : multipart ? init.body as FormData : JSON.stringify(init.body);
+  const response = await sessionFetch(`${API_URL}${path}`, {
     method: init?.method || 'GET',
-    headers: {
-      'content-type': 'application/json',
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-    },
-    body: init?.body === undefined ? undefined : JSON.stringify(init.body),
+    headers: multipart ? {} : { 'content-type': 'application/json' },
+    body: requestBody,
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -61,19 +74,25 @@ export default function PortalPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setToken(window.localStorage.getItem(TOKEN_KEY) || '');
-    setReady(true);
+    void api<{ authenticated: boolean }>('/auth/session')
+      .then(() => setToken('cookie-session'))
+      .catch(() => setToken(''))
+      .finally(() => setReady(true));
   }, []);
 
   const load = useCallback(async (activeToken = token) => {
     if (!activeToken) return;
     setLoading(true); setError('');
     try {
-      setDashboard(await api<Dashboard>('/portal/dashboard', activeToken));
+      const next = await api<Dashboard>('/portal/dashboard', activeToken);
+      setDashboard(next);
+      if (next.principal.accountType === 'CUSTOMER' && next.kycRequired && !next.kycComplete) {
+        setTab('kyc');
+      }
     } catch (requestError) {
       const message = (requestError as Error).message;
       if (/unauthorized|expired|401/i.test(message)) {
-        window.localStorage.removeItem(TOKEN_KEY); setToken(''); setDashboard(null);
+        setToken(''); setDashboard(null);
       } else setError(message);
     } finally { setLoading(false); }
   }, [token]);
@@ -81,19 +100,27 @@ export default function PortalPage() {
   useEffect(() => { if (ready && token) void load(token); }, [ready, token, load]);
 
   const logout = () => {
-    window.localStorage.removeItem(TOKEN_KEY); setToken(''); setDashboard(null); setTab('home');
+    void api('/auth/logout', token, { method: 'POST' }).finally(() => {
+      setToken(''); setDashboard(null); setTab('home');
+    });
   };
 
   if (!ready) return <div className="splash"><div className="brand-mark"><Landmark /></div><span>FINIFY</span></div>;
-  if (!token) return <Login onAuthenticated={(value) => { window.localStorage.setItem(TOKEN_KEY, value); setToken(value); }} />;
+  if (!token) return <Login onAuthenticated={() => setToken('cookie-session')} />;
   if (!dashboard) return <div className="splash"><LoaderCircle className="spin" /><span>{error || 'SECURING YOUR ACCOUNT'}</span><button onClick={() => void load()}>TRY AGAIN</button></div>;
 
   const navigation: Array<[Tab, string, React.ReactNode]> = [
     ['home', 'Home', <Home key="home" />], ['wallets', 'Wallets', <WalletCards key="wallets" />],
-    ['pay', 'Pay', <Send key="pay" />], ['activity', 'Activity', <History key="activity" />],
+    ...(dashboard.principal.accountType === 'CUSTOMER' && !dashboard.kycComplete
+      ? [['kyc', 'Verify', <Fingerprint key="kyc" />] as [Tab, string, React.ReactNode]]
+      : [['pay', 'Pay', <Send key="pay" />] as [Tab, string, React.ReactNode]]),
+    ['activity', 'Activity', <History key="activity" />],
     ['profile', 'Profile', <CircleUserRound key="profile" />],
   ];
-  const choose = (next: Tab) => { setTab(next); setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const choose = (next: Tab) => {
+    setTab(next === 'pay' && !dashboard.kycComplete ? 'kyc' : next);
+    setMenuOpen(false); window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   return (
     <main className="portal">
@@ -118,6 +145,7 @@ export default function PortalPage() {
           {tab === 'wallets' && <WalletsView wallets={dashboard.wallets} />}
           {tab === 'pay' && <PaymentView token={token} data={dashboard} onDone={() => void load()} />}
           {tab === 'activity' && <ActivityView token={token} wallets={dashboard.wallets} initial={dashboard.recentActivity} />}
+          {tab === 'kyc' && <KycView token={token} data={dashboard} onRefresh={() => void load()} />}
           {tab === 'profile' && <ProfileView token={token} data={dashboard} logout={logout} />}
         </div>
       </section>
@@ -127,14 +155,15 @@ export default function PortalPage() {
   );
 }
 
-function Login({ onAuthenticated }: { onAuthenticated: (token: string) => void }) {
+function Login({ onAuthenticated }: { onAuthenticated: () => void }) {
   const [username, setUsername] = useState(''); const [password, setPassword] = useState('');
   const [showPin, setShowPin] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setError('');
     try {
-      const result = await api<{ token: string }>('/auth/login', undefined, { method: 'POST', body: { username, password } });
-      onAuthenticated(result.token);
+      const result = await api<{ authenticated: boolean }>('/auth/login', undefined, { method: 'POST', body: { username, password } });
+      if (!result.authenticated) throw new Error('Authentication session was not created');
+      onAuthenticated();
     } catch (requestError) { setError((requestError as Error).message); } finally { setBusy(false); }
   };
   return <main className="login-shell">
@@ -147,9 +176,10 @@ function HomeView({ data, onNavigate }: { data: Dashboard; onNavigate: (tab: Tab
   const primary = data.wallets.find((wallet) => wallet.isDefault) || data.wallets[0];
   const business = data.principal.accountType === 'BUSINESS';
   return <>
+    {!business && data.kycRequired && !data.kycComplete && <section className="kyc-callout"><span><Fingerprint /></span><div><small>IDENTITY VERIFICATION REQUIRED</small><h2>Complete KYC to activate financial transactions.</h2><p>Your wallet remains protected while we verify your identity document, live selfie and sanctions screening.</p></div><button onClick={() => onNavigate('kyc')}>CONTINUE KYC <ArrowRight /></button></section>}
     <div className="welcome"><div><small>{greeting().toUpperCase()}</small><h1>{firstName(data.principal.displayName)}, your money is ready.</h1><p>{business ? 'Track settlements, accept payments and manage your business cash flow.' : 'Move money, manage currencies and stay on top of every transaction.'}</p></div><StatusBadge principal={data.principal} kyc={data.kyc} /></div>
     <div className="home-grid"><section className="balance-card"><div className="balance-head"><span><Landmark /> {primary?.walletName || 'Primary wallet'}</span><small>{primary?.currency || '—'} ·•• {primary?.walletId.slice(-4)}</small></div><p>AVAILABLE BALANCE</p><h2>{money(primary?.balance || 0, primary?.currency || 'GBP')}</h2><div className="balance-actions"><button onClick={() => onNavigate('pay')}><span><Send /></span>Send</button><button onClick={() => onNavigate('wallets')}><span><WalletCards /></span>Wallets</button><button onClick={() => onNavigate('activity')}><span><ReceiptText /></span>Statements</button></div><div className="card-glow" /></section>
-      <section className="quick-panel"><div className="section-head"><div><small>QUICK ACTIONS</small><h3>What would you like to do?</h3></div></div><div className="quick-grid"><button onClick={() => onNavigate('pay')}><span><ArrowUpRight /></span><div><strong>Send money</strong><small>To any Finify wallet</small></div><ChevronRight /></button><button onClick={() => onNavigate('wallets')}><span><WalletCards /></span><div><strong>Manage wallets</strong><small>{data.wallets.length} active account{data.wallets.length === 1 ? '' : 's'}</small></div><ChevronRight /></button><button onClick={() => onNavigate('activity')}><span><History /></span><div><strong>View activity</strong><small>Search every movement</small></div><ChevronRight /></button><button onClick={() => onNavigate('profile')}><span>{business ? <Building2 /> : <ShieldCheck />}</span><div><strong>{business ? 'Business profile' : 'Identity status'}</strong><small>{business ? data.principal.businessType || 'Verified business' : data.kyc?.status || 'KYC not started'}</small></div><ChevronRight /></button></div></section></div>
+      <section className="quick-panel"><div className="section-head"><div><small>QUICK ACTIONS</small><h3>What would you like to do?</h3></div></div><div className="quick-grid"><button onClick={() => onNavigate(data.kycComplete ? 'pay' : 'kyc')}><span>{data.kycComplete ? <ArrowUpRight /> : <Fingerprint />}</span><div><strong>{data.kycComplete ? 'Send money' : 'Complete KYC'}</strong><small>{data.kycComplete ? 'To any Finify wallet' : 'Required before financial transactions'}</small></div><ChevronRight /></button><button onClick={() => onNavigate('wallets')}><span><WalletCards /></span><div><strong>Manage wallets</strong><small>{data.wallets.length} active account{data.wallets.length === 1 ? '' : 's'}</small></div><ChevronRight /></button><button onClick={() => onNavigate('activity')}><span><History /></span><div><strong>View activity</strong><small>Search every movement</small></div><ChevronRight /></button><button onClick={() => onNavigate(data.kycComplete ? 'profile' : 'kyc')}><span>{business ? <Building2 /> : <ShieldCheck />}</span><div><strong>{business ? 'Business profile' : 'Identity status'}</strong><small>{business ? data.principal.businessType || 'Verified business' : data.kyc?.status || 'KYC not started'}</small></div><ChevronRight /></button></div></section></div>
     <section className="activity-panel"><div className="section-head"><div><small>RECENT ACTIVITY</small><h3>Latest movements</h3></div><button onClick={() => onNavigate('activity')}>VIEW ALL <ArrowRight /></button></div><ActivityList rows={data.recentActivity} empty="Your latest payments will appear here." /></section>
   </>;
 }
@@ -194,13 +224,61 @@ function ProfileView({ token, data, logout }: { token: string; data: Dashboard; 
   return <><div className="page-intro"><div><small>ACCOUNT + SECURITY</small><h1>Your profile</h1><p>Identity, access and account preferences in one place.</p></div></div><div className="profile-layout"><section className="profile-card"><div className="profile-avatar">{initials(data.principal.displayName)}</div><h2>{data.principal.displayName}</h2><span>{data.principal.accountType === 'BUSINESS' ? <BriefcaseBusiness /> : <CircleUserRound />}{data.principal.accountType === 'BUSINESS' ? 'Business account' : 'Personal account'}</span><dl><div><dt>Mobile number</dt><dd>{data.principal.ownerMsisdn}</dd></div><div><dt>Email</dt><dd>{data.principal.email || 'Not provided'}</dd></div><div><dt>Account state</dt><dd>Active</dd></div><div><dt>{data.principal.accountType === 'BUSINESS' ? 'Business type' : 'KYC status'}</dt><dd>{data.principal.accountType === 'BUSINESS' ? data.principal.businessType || 'Business' : data.kyc?.status || 'Not started'}</dd></div></dl></section><section className="security-card"><div className="section-head"><div><small>SECURITY</small><h3>Change secure PIN</h3></div><ShieldCheck /></div><p>Use 4–8 digits. Never share your PIN with anyone, including Finify support.</p>{message && <div className="notice success">{message}</div>}<label><span>CURRENT PIN</span><input type="password" inputMode="numeric" value={pins.currentPin} onChange={(event) => setPins({ ...pins, currentPin: event.target.value.replace(/\D/g, '') })} /></label><label><span>NEW PIN</span><input type="password" inputMode="numeric" value={pins.newPin} onChange={(event) => setPins({ ...pins, newPin: event.target.value.replace(/\D/g, '') })} /></label><button className="primary" disabled={!pins.currentPin || pins.newPin.length < 4} onClick={() => void changePin()}><LockKeyhole /> UPDATE PIN</button><button className="signout" onClick={logout}><LogOut /> SIGN OUT OF FINIFY</button></section></div></>;
 }
 
+function KycView({ token, data, onRefresh }: { token: string; data: Dashboard; onRefresh: () => void }) {
+  const [journey, setJourney] = useState<KycJourney | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setBusy(true); setError('');
+    try { setJourney(await api<KycJourney>('/portal/kyc', token)); }
+    catch (next) { setError((next as Error).message); }
+    finally { setBusy(false); }
+  }, [token]);
+  useEffect(() => { void load(); }, [load]);
+  const upload = async (role: string, file?: File) => {
+    if (!file) return;
+    const form = new FormData(); form.set('role', role); form.set('file', file);
+    setBusy(true); setError(''); setMessage('');
+    try {
+      await api('/portal/kyc/documents', token, { method: 'POST', body: form });
+      setMessage(`${role.replaceAll('_', ' ')} uploaded securely.`); await load();
+    } catch (next) { setError((next as Error).message); }
+    finally { setBusy(false); }
+  };
+  const verify = async () => {
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const next = await api<KycJourney>('/portal/kyc/verify', token, { method: 'POST', body: {} });
+      setJourney(next); setMessage('Verification completed and sent for independent review.'); onRefresh();
+    } catch (next) { setError((next as Error).message); }
+    finally { setBusy(false); }
+  };
+  const kycCase = journey?.case;
+  const roles = new Set(kycCase?.documents.map((document) => document.role) || []);
+  const identityRole = kycCase?.documentType === 'PASSPORT' ? 'PASSPORT' : 'ID_FRONT';
+  const editable = ['DRAFT', 'RESUBMISSION_REQUIRED'].includes(kycCase?.status || '');
+  const readyToVerify = roles.has(identityRole) && roles.has('SELFIE');
+  return <div className="kyc-journey">
+    <div className="page-intro"><div><small>SECURE IDENTITY</small><h1>Verify who you are.</h1><p>Complete these protected checks once to activate payments and KYC-required wallet services.</p></div><StatusBadge principal={data.principal} kyc={data.kyc} /></div>
+    {error && <div className="notice"><ShieldCheck />{error}</div>}{message && <div className="notice success"><Check />{message}</div>}
+    <section className="kyc-progress"><div className={roles.has(identityRole) ? 'done' : 'active'}><span>{roles.has(identityRole) ? <Check /> : '1'}</span><strong>Identity document</strong><small>{roles.has(identityRole) ? 'Uploaded' : 'Required'}</small></div><i /><div className={roles.has('SELFIE') ? 'done' : roles.has(identityRole) ? 'active' : ''}><span>{roles.has('SELFIE') ? <Check /> : '2'}</span><strong>Live selfie</strong><small>{roles.has('SELFIE') ? 'Captured' : 'Required'}</small></div><i /><div className={kycCase?.status === 'APPROVED' ? 'done' : ['MANUAL_REVIEW', 'PROCESSING'].includes(kycCase?.status || '') ? 'active' : ''}><span>{kycCase?.status === 'APPROVED' ? <Check /> : '3'}</span><strong>Secure review</strong><small>{kycCase?.status?.replaceAll('_', ' ') || 'Pending'}</small></div></section>
+    {busy && !journey ? <div className="empty"><LoaderCircle className="spin" /><strong>Loading your secure KYC case</strong></div> : !kycCase ? <section className="kyc-state"><ShieldCheck /><h2>KYC case unavailable</h2><p>Please contact support so a protected identity case can be linked to your account.</p></section> : editable ? <div className="kyc-upload-grid">
+      <label className={roles.has(identityRole) ? 'complete' : ''}><span>{roles.has(identityRole) ? <FileCheck2 /> : <UploadCloud />}</span><div><small>STEP 01</small><h2>{kycCase.documentType === 'PASSPORT' ? 'Passport photo page' : 'National ID front'}</h2><p>Use a clear image with all corners visible and no glare.</p></div><input type="file" accept="image/jpeg,image/png" capture="environment" disabled={busy} onChange={(event) => void upload(identityRole, event.target.files?.[0])} /><b>{roles.has(identityRole) ? 'REPLACE IMAGE' : 'TAKE OR UPLOAD PHOTO'}</b></label>
+      {kycCase.documentType !== 'PASSPORT' && <label className={roles.has('ID_BACK') ? 'complete optional' : 'optional'}><span>{roles.has('ID_BACK') ? <FileCheck2 /> : <UploadCloud />}</span><div><small>OPTIONAL</small><h2>National ID back</h2><p>Add the reverse side when it contains identity information.</p></div><input type="file" accept="image/jpeg,image/png" capture="environment" disabled={busy} onChange={(event) => void upload('ID_BACK', event.target.files?.[0])} /><b>{roles.has('ID_BACK') ? 'REPLACE IMAGE' : 'ADD BACK IMAGE'}</b></label>}
+      <label className={roles.has('SELFIE') ? 'complete selfie' : 'selfie'}><span>{roles.has('SELFIE') ? <Check /> : <Camera />}</span><div><small>STEP 02</small><h2>Live selfie</h2><p>Face the camera directly in good light. Remove sunglasses and hats.</p></div><input type="file" accept="image/jpeg,image/png" capture="user" disabled={busy} onChange={(event) => void upload('SELFIE', event.target.files?.[0])} /><b>{roles.has('SELFIE') ? 'RETAKE SELFIE' : 'OPEN CAMERA'}</b></label>
+      <section className="kyc-submit"><div><ScanFace /><span><strong>Encrypted verification</strong><small>OCR, face comparison and sanctions screening run together.</small></span></div><button className="primary" disabled={busy || !readyToVerify} onClick={() => void verify()}>{busy ? <LoaderCircle className="spin" /> : <Fingerprint />} SUBMIT FOR VERIFICATION <ArrowRight /></button></section>
+    </div> : <section className={`kyc-state ${kycCase.status === 'APPROVED' ? 'approved' : ''}`}><span>{kycCase.status === 'APPROVED' ? <Check /> : <LoaderCircle className={kycCase.status === 'PROCESSING' ? 'spin' : ''} />}</span><small>CASE {kycCase.id.slice(0, 8).toUpperCase()}</small><h2>{kycCase.status === 'APPROVED' ? 'Identity verified' : kycCase.status === 'MANUAL_REVIEW' ? 'Verification under review' : kycCase.status.replaceAll('_', ' ')}</h2><p>{kycCase.status === 'APPROVED' ? 'Your KYC-required financial services are active.' : 'Your evidence has been received. An independent checker must approve it before payments are enabled.'}</p>{kycCase.faceMatchScore !== null && kycCase.faceMatchScore !== undefined && <div><span>FACE MATCH</span><strong>{Number(kycCase.faceMatchScore).toFixed(1)}%</strong></div>}<button className="outline" onClick={() => void load()}><RefreshCw /> REFRESH STATUS</button></section>}
+  </div>;
+}
+
 function ActivityList({ rows, empty }: { rows: Activity[]; empty: string }) {
   if (!rows.length) return <div className="empty"><ReceiptText /><strong>No activity yet</strong><span>{empty}</span></div>;
   return <div className="activity-list">{rows.map((row) => { const outgoing = Number(row.debit || 0) > 0; const amount = outgoing ? row.debit : row.credit; return <div key={row.id}><span className={outgoing ? 'movement out' : 'movement in'}>{outgoing ? <ArrowUpRight /> : <ArrowDownLeft />}</span><div><strong>{row.keyword || (outgoing ? 'Money sent' : 'Money received')}</strong><small>{formatDate(row.createdAt)} · {row.reference || `Transaction ${row.transactionId || row.id}`}</small></div><b className={outgoing ? 'negative' : 'positive'}>{outgoing ? '−' : '+'}{money(amount, row.currency)}</b></div>; })}</div>;
 }
 
 function StatusBadge({ principal, kyc }: { principal: Principal; kyc?: Dashboard['kyc'] }) { const text = principal.accountType === 'BUSINESS' ? 'BUSINESS ACTIVE' : kyc?.status === 'APPROVED' ? 'IDENTITY VERIFIED' : `KYC ${kyc?.status || 'NOT STARTED'}`; return <span className={`status ${text.includes('VERIFIED') || text.includes('ACTIVE') ? 'live' : ''}`}><i />{text}</span>; }
-function titleFor(tab: Tab) { return ({ home: 'Overview', wallets: 'Wallets', pay: 'Send money', activity: 'Activity', profile: 'Profile & security' } as const)[tab]; }
+function titleFor(tab: Tab) { return ({ home: 'Overview', wallets: 'Wallets', pay: 'Send money', activity: 'Activity', kyc: 'Identity verification', profile: 'Profile & security' } as const)[tab]; }
 function initials(value: string) { return value.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'FI'; }
 function firstName(value: string) { return value.trim().split(/\s+/)[0] || 'there'; }
 function greeting() { const hour = new Date().getHours(); return hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening'; }

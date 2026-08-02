@@ -53,9 +53,14 @@ describe('WalletService', () => {
         }
         if (sql.includes('WHERE "Wallet_MSISDN"=$1')) return [];
         if (sql.includes('FROM kyc.cases')) return [];
+        if (sql.includes('INSERT INTO kyc.cases')) {
+          return [{ id: '04300000-0000-4000-8000-000000000001', status: 'DRAFT',
+            documentType: 'UGANDA_NATIONAL_ID', issuingCountry: 'UGA' }];
+        }
         if (sql.includes('customer_account_opening_requests')) {
           return [{ id: 'opening-id', status: 'PENDING_KYC', walletCode: 215,
-            currency: 'GBP', kycRequired: true }];
+            currency: 'GBP', kycRequired: true,
+            kycCaseId: '04300000-0000-4000-8000-000000000001' }];
         }
         return [];
       }),
@@ -66,6 +71,8 @@ describe('WalletService', () => {
     }, 'maker');
     expect(result.wallet).toBeNull();
     expect(result.accountOpening.status).toBe('PENDING_KYC');
+    expect(result.accountOpening.kycCase.status).toBe('DRAFT');
+    expect(queries.some(sql => sql.includes('INSERT INTO kyc.cases'))).toBe(true);
     expect(queries.some(sql => sql.includes('INSERT INTO public."SW_TBL_WALLET"'))).toBe(false);
   });
 

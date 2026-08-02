@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import styles from './KycWorkspace.module.css';
+import { sessionFetch } from '../../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
 
@@ -19,6 +20,7 @@ type CaseRow = {
   documents?: Array<{ id: string; role: string; originalName: string }>;
   audit?: Array<{ action: string; reason: string; actor: string; createdAt: string }>;
   extractedData?: Record<string, unknown>;
+  screeningSummary?: Record<string, unknown>;
 };
 type SanctionsStatus = {
   totalRecords: number;
@@ -33,10 +35,9 @@ type SanctionsStatus = {
 };
 
 async function request<T>(path: string, token: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}/admin/operations/kyc/${path}`, {
+  const response = await sessionFetch(`${API_URL}/admin/operations/kyc/${path}`, {
     ...init,
     headers: {
-      authorization: `Bearer ${token}`,
       ...(init?.body instanceof FormData ? {} : { 'content-type': 'application/json' }),
       ...init?.headers,
     },
@@ -268,6 +269,7 @@ export default function KycWorkspace({ token, profile }: { token: string; profil
           {!selected ? <p className={styles.empty}>Select a KYC case to inspect its protected evidence and audit history.</p> : <>
             <div><span className={styles.eyebrow}>CASE {selected.id.slice(0, 8)}</span><h2>{selected.customerMsisdn}</h2><span className={styles.status}>{selected.status.replaceAll('_', ' ')}</span></div>
             <dl><div><dt>Document</dt><dd>{selected.documentType.replaceAll('_', ' ')}</dd></div><div><dt>Country</dt><dd>{selected.issuingCountry}</dd></div><div><dt>System recommendation</dt><dd>{selected.systemRecommendation || 'Pending'}</dd></div><div><dt>Face score</dt><dd>{selected.faceMatchScore === null || selected.faceMatchScore === undefined ? 'Pending' : `${Number(selected.faceMatchScore).toFixed(2)}%`}</dd></div></dl>
+            {selected.extractedData && <div><span className={styles.label}>Verified profile data</span><dl><div><dt>Full name</dt><dd>{String(selected.extractedData.fullName || [selected.extractedData.firstName, selected.extractedData.lastName].filter(Boolean).join(' ') || 'Not extracted')}</dd></div><div><dt>ID number</dt><dd>{String(selected.extractedData.idNumber || 'Not extracted')}</dd></div><div><dt>Date of birth</dt><dd>{String(selected.extractedData.dateOfBirth || 'Not extracted')}</dd></div><div><dt>Gender</dt><dd>{String(selected.extractedData.gender || 'Not extracted')}</dd></div><div><dt>Address</dt><dd>{String(selected.extractedData.address || 'Not extracted')}</dd></div><div><dt>Sanctions screening</dt><dd>{String(selected.screeningSummary?.status || 'Not completed')}</dd></div></dl><p className={styles.empty}>On approval, extracted values are synchronized to the customer profile. Missing values do not erase existing profile data.</p></div>}
             {canOperate && ['DRAFT', 'RESUBMISSION_REQUIRED'].includes(selected.status) && <div>
               <span className={styles.label}>Protected evidence</span>
               {(['ID_FRONT', 'ID_BACK', 'SELFIE'] as const).map((role) => <label className={styles.document} key={role}><span>{role.replaceAll('_', ' ')}</span><input type="file" accept="image/jpeg,image/png" disabled={busy} onChange={(event) => void upload(role, event.target.files?.[0])} /></label>)}

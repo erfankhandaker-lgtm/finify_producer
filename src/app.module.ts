@@ -10,16 +10,14 @@ import { AppService } from './app.service';
 import { EmailSendModule } from './modules/email-send/email-send.module';
 import { KafkaModule } from './config/kafka/kafka.module'
 import { AuthModule } from './modules/auth/auth.module';
-import { ApifetchModule } from './modules/apifetch/apifetch.module';
-import { UserModule } from './modules/user/user.module'
 import { RedisModule } from './config/redis/redis.module'
 import { TransactionModule } from './modules/transaction/transaction.module';
-import { RegistrationModule } from './modules/registration/registration.module';
 import { AdminAuthModule } from './modules/admin-auth/admin-auth.module';
 import { ReferenceDataModule } from './modules/reference-data/reference-data.module';
 import { WalletModule } from './modules/wallets/wallet.module';
 import { AdminOperationsModule } from './modules/admin-operations/admin-operations.module';
 import { PortalModule } from './modules/portal/portal.module';
+import { MrFinifyModule } from './modules/mr-finify/mr-finify.module';
 
 @Module({
   imports: [
@@ -29,14 +27,12 @@ import { PortalModule } from './modules/portal/portal.module';
     KafkaModule,
     EmailSendModule,
     AuthModule,
-    ApifetchModule,
-    UserModule,
     TransactionModule,
-    RegistrationModule,
     AdminAuthModule,
     ReferenceDataModule,
     WalletModule,
     AdminOperationsModule,
+    MrFinifyModule,
     PortalModule,
   ],
   controllers: [

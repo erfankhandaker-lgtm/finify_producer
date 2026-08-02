@@ -1,5 +1,5 @@
 import { SwTblTransactionEntry, SwTblWallet, TransactionRequest } from '@models/index';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common'
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { CreateTransactionRequestDto, PaginationDto, UpdateTransactionRequestDto } from './dto/transaction-request.dto';
 import { winstonLog } from '@config/winstonLog';
@@ -91,6 +91,47 @@ export  class TransactionRequestService {
         return await this.transactionRequestRepository.findOne({
             where: { transactionId },
         });
+    }
+    async assertWalletOwned(identity: string, walletId: string) {
+      const wallet = await this.walletRepository.findOne({
+        where: { walletMsisdn: walletId, ownerMsisdn: identity },
+      });
+      if (!wallet) throw new ForbiddenException('Wallet is not owned by the authenticated account');
+      return wallet;
+    }
+
+    async findOneForOwner(transactionId: string, identity: string) {
+      const transaction = await this.findOne(transactionId);
+      if (!transaction) throw new NotFoundException('Transaction request was not found');
+      await this.assertWalletOwned(identity, transaction.sourceWalletId);
+      return transaction;
+    }
+
+    async findAllPaginatedForOwner(
+      paginationDto: PaginationDto,
+      identity: string,
+    ): Promise<PaginationResponse<SwTblTransactionEntry>> {
+      const { page, limit, accountnumber } = paginationDto;
+      if (accountnumber) await this.assertWalletOwned(identity, accountnumber);
+      const query = this.transactionEntryRepository
+        .createQueryBuilder('entry')
+        .innerJoin(
+          SwTblWallet,
+          'wallet',
+          'wallet.walletMsisdn = entry.accountnumber AND wallet.ownerMsisdn = :identity',
+          { identity },
+        )
+        .orderBy('entry.entrydate', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit);
+      if (accountnumber) query.andWhere('entry.accountnumber = :accountnumber', { accountnumber });
+      const [rows, count] = await query.getManyAndCount();
+      return {
+        data: rows,
+        totalRecords: count,
+        currentPage: page,
+        totalPages: Math.ceil(count / limit),
+      };
     }
     async findAllPaginated(paginationDto: PaginationDto): Promise<PaginationResponse<SwTblTransactionEntry>> {
     const { page, limit, accountnumber } = paginationDto;

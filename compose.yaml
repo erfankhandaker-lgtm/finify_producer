@@ -1,17 +1,54 @@
 name: finify
 
 services:
+  kong:
+    image: ${KONG_IMAGE:-kong:3.9.3}
+    restart: unless-stopped
+    init: true
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/declarative/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
+      KONG_ADMIN_LISTEN: 127.0.0.1:8001
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      KONG_NGINX_WORKER_PROCESSES: auto
+      KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ACCESS_LOG: /dev/null
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./kong/kong.yml:/kong/declarative/kong.yml:ro
+    ports:
+      - "${KONG_PROXY_HTTP_PORT:-8080}:8000"
+      - "${KONG_PROXY_HTTPS_PORT:-8443}:8443"
+    expose:
+      - "8100"
+    depends_on:
+      producer:
+        condition: service_healthy
+      consumer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
   portal-ui:
     build:
       context: ./portal-ui
       dockerfile: Dockerfile
       target: runtime
+      args:
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080/finify}
     restart: unless-stopped
     init: true
     environment:
       PORT: 3200
       HOSTNAME: 0.0.0.0
-      NEXT_PUBLIC_API_URL: http://localhost:${PRODUCER_PORT:-5002}/finify
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080/finify}
       NEXT_PUBLIC_SITE_URL: http://localhost:${PORTAL_UI_PORT:-3200}
     ports:
       - "${PORTAL_UI_PORT:-3200}:3200"
@@ -36,15 +73,13 @@ services:
       target: runtime
       args:
         NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+        NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080/finify}
     restart: unless-stopped
     init: true
     environment:
       PORT: 3100
       HOSTNAME: 0.0.0.0
-      NEXT_PUBLIC_API_URL: http://localhost:${PRODUCER_PORT:-5002}/finify
-      NEXT_PUBLIC_CREDIT_RULE_API_URL: http://localhost:${CREDIT_RULE_PORT:-5005}
-      NEXT_PUBLIC_ACCOUNTING_API_URL: http://localhost:${ACCOUNTING_PORT:-5004}
-      NEXT_PUBLIC_CONSUMER_API_URL: http://localhost:${CONSUMER_PORT:-5003}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:8080/finify}
       NEXT_PUBLIC_SITE_URL: http://localhost:${ADMIN_UI_PORT:-3100}
     ports:
       - "${ADMIN_UI_PORT:-3100}:3100"
@@ -72,13 +107,15 @@ services:
     env_file:
       - .env
     environment:
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       PORT: 5002
       SSL: "false"
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
       MINIO_PORT: ${MINIO_PORT:-9000}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-finify-minio-admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-}
       MINIO_TREASURY_BUCKET: ${MINIO_TREASURY_BUCKET:-finify-treasury-documents}
       MINIO_ADMIN_BIOMETRIC_BUCKET: ${MINIO_ADMIN_BIOMETRIC_BUCKET:-finify-admin-biometric}
       ADMIN_FACE_MATCH_THRESHOLD: ${ADMIN_FACE_MATCH_THRESHOLD:-45}
@@ -90,13 +127,24 @@ services:
       PORTAL_UI_SERVICE_URL: http://portal-ui:3200
       KYC_SERVICE_URL: http://kyc:5006
       KYC_OCR_SERVICE_URL: http://kyc-ocr:8000
-      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-finify-local-kyc-key-change-me}
+      KONG_STATUS_URL: http://kong:8100/status
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3100,http://localhost:3200}
+      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-}
+      ACCOUNTING_ADMIN_API_KEY: ${ACCOUNTING_ADMIN_API_KEY:-}
+      INTEGRATION_ADMIN_API_KEY: ${INTEGRATION_ADMIN_API_KEY:-}
+      CREDIT_RULE_ADMIN_API_KEY: ${CREDIT_RULE_ADMIN_API_KEY:-}
+      CREDIT_RULE_EVALUATION_API_KEY: ${CREDIT_RULE_EVALUATION_API_KEY:-}
       ADMIN_MFA_ENCRYPTION_KEY: ${ADMIN_MFA_ENCRYPTION_KEY:-}
+      FINIFY_SECRET_ENCRYPTION_KEY: ${FINIFY_SECRET_ENCRYPTION_KEY:-}
       ADMIN_MFA_ISSUER: ${ADMIN_MFA_ISSUER:-Finify Admin}
       TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
       TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
-    ports:
-      - "${PRODUCER_PORT:-5002}:5002"
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-sol}
+      OPENAI_TIMEOUT_MS: ${OPENAI_TIMEOUT_MS:-60000}
+      MR_FINIFY_RATE_LIMIT_PER_MINUTE: ${MR_FINIFY_RATE_LIMIT_PER_MINUTE:-20}
+    expose:
+      - "5002"
     healthcheck:
       test:
         - CMD
@@ -113,11 +161,11 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-finify-minio-admin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
-    ports:
-      - "${MINIO_API_PORT:-9010}:9000"
-      - "${MINIO_CONSOLE_PORT:-9011}:9001"
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-}
+    expose:
+      - "9000"
+      - "9001"
     volumes:
       - finify_minio_data:/data
     healthcheck:
@@ -136,6 +184,8 @@ services:
     env_file:
       - .env
     environment:
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       SERVICE_NAME: finify_service_consumer
       KAFKA_CLIENT_ID: finify-service-consumer
       KAFKA_GROUP_ID: finify-service-consumer
@@ -143,11 +193,11 @@ services:
       KAFKA_FROM_BEGINNING: ${KAFKA_FROM_BEGINNING:-false}
       SPECIAL_MERCHANT_TYPES: ${SPECIAL_MERCHANT_TYPES:-Special,External}
       CONSUMER_HTTP_PORT: 5003
-      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:-finify-local-development-secret-key-change-me}
+      INTEGRATION_SECRET_KEY: ${INTEGRATION_SECRET_KEY:-}
       INTEGRATION_ADMIN_API_KEY: ${INTEGRATION_ADMIN_API_KEY:-}
-      MERCHANT_CONFIRMATION_PUBLIC_URL: ${MERCHANT_CONFIRMATION_PUBLIC_URL:-http://localhost:5003/v1/merchant-confirmations}
-    ports:
-      - "${CONSUMER_PORT:-5003}:5003"
+      MERCHANT_CONFIRMATION_PUBLIC_URL: ${MERCHANT_CONFIRMATION_PUBLIC_URL:-http://localhost:8080/v1/merchant-confirmations}
+    expose:
+      - "5003"
     healthcheck:
       test:
         - CMD
@@ -168,8 +218,8 @@ services:
     environment:
       MOCK_MERCHANT_PORT: 5010
       MOCK_MERCHANT_TIMEOUT_DELAY_MS: ${MOCK_MERCHANT_TIMEOUT_DELAY_MS:-5000}
-    ports:
-      - "${MOCK_MERCHANT_PORT:-5010}:5010"
+    expose:
+      - "5010"
     healthcheck:
       test:
         - CMD
@@ -191,15 +241,17 @@ services:
     env_file:
       - .env
     environment:
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       SERVICE_NAME: finify_accounting_service
       ACCOUNTING_HTTP_PORT: 5004
       ACCOUNTING_REPORTING_ENTITY: FINIFY_UK
-      ACCOUNTING_AUTO_EOD: ${ACCOUNTING_AUTO_EOD:-false}
+      ACCOUNTING_AUTO_EOD: ${ACCOUNTING_AUTO_EOD:-true}
       ACCOUNTING_SCHEDULER_INTERVAL_MS: ${ACCOUNTING_SCHEDULER_INTERVAL_MS:-30000}
       ACCOUNTING_CATCH_UP_MAX_DAYS_PER_TICK: ${ACCOUNTING_CATCH_UP_MAX_DAYS_PER_TICK:-31}
       ACCOUNTING_ADMIN_API_KEY: ${ACCOUNTING_ADMIN_API_KEY:-}
-    ports:
-      - "${ACCOUNTING_PORT:-5004}:5004"
+    expose:
+      - "5004"
     healthcheck:
       test:
         - CMD
@@ -221,6 +273,8 @@ services:
     env_file:
       - .env
     environment:
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       SERVICE_NAME: finify_credit_rule_service
       CREDIT_RULE_HTTP_PORT: 5005
       CREDIT_RULE_ADMIN_API_KEY: ${CREDIT_RULE_ADMIN_API_KEY:-}
@@ -228,8 +282,8 @@ services:
       CREDIT_RULE_ALLOWED_SCHEMAS: ${CREDIT_RULE_ALLOWED_SCHEMAS:-public}
       CREDIT_RULE_HTTP_ALLOWED_HOSTS: ${CREDIT_RULE_HTTP_ALLOWED_HOSTS:-}
       CREDIT_RULE_ALLOW_INSECURE_HTTP: ${CREDIT_RULE_ALLOW_INSECURE_HTTP:-false}
-    ports:
-      - "${CREDIT_RULE_PORT:-5005}:5005"
+    expose:
+      - "5005"
     healthcheck:
       test:
         - CMD
@@ -251,17 +305,19 @@ services:
     env_file:
       - .env
     environment:
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       KYC_HTTP_PORT: 5006
-      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-finify-local-kyc-key-change-me}
+      KYC_ADMIN_API_KEY: ${KYC_ADMIN_API_KEY:-}
       KYC_OCR_SERVICE_URL: http://kyc-ocr:8000
       MINIO_ENDPOINT: ${MINIO_ENDPOINT:-minio}
       MINIO_PORT: ${MINIO_PORT:-9000}
       MINIO_USE_SSL: ${MINIO_USE_SSL:-false}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-finify-minio-admin}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-change-this-minio-password}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-}
       MINIO_KYC_BUCKET: ${MINIO_KYC_BUCKET:-finify-kyc-documents}
-    ports:
-      - "${KYC_PORT:-5006}:5006"
+    expose:
+      - "5006"
     depends_on:
       minio:
         condition: service_healthy
@@ -286,8 +342,8 @@ services:
     init: true
     environment:
       KYC_ALLOWED_DOCUMENT_HOSTS: minio
-    ports:
-      - "${KYC_OCR_PORT:-8000}:8000"
+    expose:
+      - "8000"
     healthcheck:
       test:
         - CMD

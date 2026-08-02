@@ -11,18 +11,30 @@ On the first PostgreSQL startup it runs, in order:
 
 1. `001_legacy_baseline.sql` — reconstructs the legacy tables and views used by
    the producer and consumer.
-2. `002_apply_migrations.sql` — applies migrations 001 through 017.
+2. `002_apply_migrations.sql` — applies migrations 001 through 043 once and
+   creates the migration ledger.
 3. `003_seed_local.sql` — loads local keywords, wallet types, customer and
    merchant profiles, scored customers, wallets, AML configuration, charge
    rules, and commission rules.
 
+After initial creation, apply new migrations through the checksum-verified
+runner. Never execute `002_apply_migrations.sql` against an existing database:
+
+```sh
+npm run migrate
+```
+
+An existing pre-ledger installation must first be verified and explicitly
+baselined, for example `npm run migrate -- --baseline-through=043`. The runner
+refuses implicit baselining and refuses any changed, previously applied file.
+Each new migration and its ledger record are committed in one database
+transaction. In production, provide a restricted deployment credential through
+`MIGRATION_DATABASE_URL`; application processes do not run migrations at boot.
+
 Local endpoints:
 
 - Admin UI: `http://localhost:3100`
-- Producer API: `http://localhost:5002/finify`
-- Consumer API: `http://localhost:5003`
-- Accounting API: `http://localhost:5004`
-- Credit-rule API: `http://localhost:5005`
+- Kong API gateway: `http://localhost:8080`
 - PostgreSQL: `localhost:5444` (`finify` / `finify_local_password`)
 - Redis: `localhost:7025`
 - Kafka: `localhost:9093`

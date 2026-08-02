@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { TransactionRequestService } from './transaction-request.service';
 
 describe('TransactionRequestService currency controls', () => {
@@ -51,5 +51,23 @@ describe('TransactionRequestService currency controls', () => {
       .mockResolvedValueOnce({ walletMsisdn: request.destinationAccount, status: 0, currency: 'USD' });
     await expect(service.create(request)).rejects.toBeInstanceOf(BadRequestException);
     expect(transactionRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('allows access only when the wallet belongs to the authenticated identity', async () => {
+    walletRepository.findOne.mockResolvedValueOnce({
+      walletMsisdn: request.sourceAccount,
+      ownerMsisdn: request.mobileNumber,
+    });
+    await expect(service.assertWalletOwned(request.mobileNumber, request.sourceAccount))
+      .resolves.toEqual(expect.objectContaining({ walletMsisdn: request.sourceAccount }));
+    expect(walletRepository.findOne).toHaveBeenCalledWith({
+      where: { walletMsisdn: request.sourceAccount, ownerMsisdn: request.mobileNumber },
+    });
+  });
+
+  it('rejects a wallet owned by another identity', async () => {
+    walletRepository.findOne.mockResolvedValueOnce(null);
+    await expect(service.assertWalletOwned(request.mobileNumber, '999999999999'))
+      .rejects.toBeInstanceOf(ForbiddenException);
   });
 });

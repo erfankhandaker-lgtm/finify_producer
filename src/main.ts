@@ -10,7 +10,37 @@ import {nestwinstonLog, HttpPortLog} from './config/winstonLog'
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import fs from 'fs'
 
+const runtimeMode = () => String(process.env.NODE_MODE || process.env.NODE_ENV || 'development').toLowerCase();
+const isProduction = () => ['prod', 'production'].includes(runtimeMode());
+
+function validateProductionConfiguration() {
+  if (!isProduction()) return;
+  const required = [
+    'JWTKEY',
+    'ADMIN_JWT_SECRET',
+    'AUTH_MODULE',
+    'DB_HOST',
+    'DB_USER',
+    'DB_PASS',
+    'DB_NAME_PRODUCTION',
+    'MINIO_ACCESS_KEY',
+    'MINIO_SECRET_KEY',
+    'KYC_ADMIN_API_KEY',
+    'ACCOUNTING_ADMIN_API_KEY',
+    'INTEGRATION_ADMIN_API_KEY',
+    'CREDIT_RULE_ADMIN_API_KEY',
+    'CREDIT_RULE_EVALUATION_API_KEY',
+    'ADMIN_MFA_ENCRYPTION_KEY',
+    'CORS_ALLOWED_ORIGINS',
+  ];
+  const missing = required.filter((key) => !String(process.env[key] || '').trim());
+  if (missing.length) {
+    throw new Error(`Production configuration is incomplete: ${missing.join(', ')}`);
+  }
+}
+
 async function bootstrap() {
+  validateProductionConfiguration();
   const NestFactoryOptions = {logger:  nestwinstonLog}
 
   if(process.env.SSL == 'true') {
@@ -34,8 +64,22 @@ async function bootstrap() {
  
    app.use(localize)
 
-   //handle browser cros..
-   app.enableCors()
+   const allowedOrigins = String(process.env.CORS_ALLOWED_ORIGINS || '')
+     .split(',')
+     .map((origin) => origin.trim())
+     .filter(Boolean);
+   app.enableCors({
+     origin: allowedOrigins.length ? allowedOrigins : !isProduction(),
+     credentials: true,
+     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+   });
+   app.use((_request, response, next) => {
+     response.setHeader('X-Content-Type-Options', 'nosniff');
+     response.setHeader('X-Frame-Options', 'DENY');
+     response.setHeader('Referrer-Policy', 'no-referrer');
+     response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+     next();
+   });
 
   // handle all user input validation globally
 
@@ -45,7 +89,7 @@ async function bootstrap() {
   // app.useGlobalGuards(new AuthModuleGuard())
 
    //SwaggerModule not use for production...
-   if(process.env.NODE_ENV != 'production') {
+   if(!isProduction()) {
 
     const config = new DocumentBuilder()
     .setTitle('Finify Producer API')

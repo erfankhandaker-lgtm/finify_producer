@@ -3,7 +3,7 @@ import { AdminOperationsService } from './admin-operations.service';
 describe('AdminOperationsService system pulse', () => {
   it('summarizes every application and dependency independently', async () => {
     const service = new AdminOperationsService(
-      {} as any,
+      { query: jest.fn().mockResolvedValue([{ database_key_configured: false, model: 'gpt-5.6-sol' }]) } as any,
       {
         get: jest.fn((key: string) => ({
           CREDIT_RULE_SERVICE_URL: 'http://credit',
@@ -13,6 +13,7 @@ describe('AdminOperationsService system pulse', () => {
           PORTAL_UI_SERVICE_URL: 'http://portal-ui',
           KYC_SERVICE_URL: 'http://kyc',
           KYC_OCR_SERVICE_URL: 'http://kyc-ocr',
+          KONG_STATUS_URL: 'http://kong:8100/status',
         })[key]),
       } as any,
       {} as any,
@@ -45,9 +46,10 @@ describe('AdminOperationsService system pulse', () => {
 
     await expect(service.systemPulse()).resolves.toMatchObject({
       status: 'degraded',
-      summary: { total: 13, operational: 12, degraded: 1 },
+      summary: { total: 15, operational: 13, degraded: 2 },
       services: expect.arrayContaining([
         expect.objectContaining({ id: 'producer', state: 'operational' }),
+        expect.objectContaining({ id: 'kong', state: 'operational' }),
         expect.objectContaining({ id: 'portal-ui', state: 'operational' }),
         expect.objectContaining({ id: 'consumer', state: 'degraded' }),
         expect.objectContaining({ id: 'mock-merchant', state: 'operational' }),

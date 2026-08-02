@@ -3,7 +3,14 @@ import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
+const isProduction = () => ['prod', 'production'].includes(String(
+  process.env.NODE_MODE || process.env.NODE_ENV || 'development',
+).toLowerCase());
+
 async function bootstrap() {
+  if (isProduction() && !process.env.KYC_ADMIN_API_KEY) {
+    throw new Error('KYC_ADMIN_API_KEY is required in production');
+  }
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(new ValidationPipe({
     transform: true,

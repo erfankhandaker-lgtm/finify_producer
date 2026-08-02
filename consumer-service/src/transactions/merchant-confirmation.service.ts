@@ -102,7 +102,9 @@ export class MerchantConfirmationService {
   private authorize(attempt: Record<string, unknown>, headers: Record<string, string | undefined>, rawBody: string): void {
     const type = String(attempt.callback_auth_type);
     const encrypted = attempt.callback_secret_ciphertext === null ? null : String(attempt.callback_secret_ciphertext);
-    if (type === 'NONE') return;
+    if (type === 'NONE' && !['prod', 'production'].includes(String(
+      process.env.NODE_MODE || process.env.NODE_ENV || 'development',
+    ).toLowerCase())) return;
     if (type === 'API_KEY' && this.secrets.verifyApiKey(headers['x-integration-key'], encrypted)) return;
     if (type === 'HMAC' && this.secrets.verifyHmac(rawBody, headers['x-finify-signature'], encrypted)) return;
     throw new UnauthorizedException('Merchant confirmation authentication failed');

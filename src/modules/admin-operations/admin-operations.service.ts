@@ -36,17 +36,34 @@ export class AdminOperationsService {
     const portalUiUrl = this.config.get<string>('PORTAL_UI_SERVICE_URL') || 'http://127.0.0.1:3200';
     const kycUrl = this.config.get<string>('KYC_SERVICE_URL') || 'http://127.0.0.1:5006';
     const kycOcrUrl = this.config.get<string>('KYC_OCR_SERVICE_URL') || 'http://127.0.0.1:8000';
+    const kongStatusUrl = this.config.get<string>('KONG_STATUS_URL') || 'http://127.0.0.1:8100/status';
+    const accountingKey = this.config.get<string>('ACCOUNTING_ADMIN_API_KEY') || '';
+    const integrationKey = this.config.get<string>('INTEGRATION_ADMIN_API_KEY') || '';
+    const creditKey = this.config.get<string>('CREDIT_RULE_ADMIN_API_KEY') || '';
+    const kycKey = this.config.get<string>('KYC_ADMIN_API_KEY') || '';
     const minioProtocol = String(this.config.get<string>('MINIO_USE_SSL') || 'false') === 'true'
       ? 'https'
       : 'http';
     const minioUrl = `${minioProtocol}://${this.config.get<string>('MINIO_ENDPOINT') || '127.0.0.1'}:${this.config.get<string>('MINIO_PORT') || '9000'}`;
-    const [adminUi, portalUi, consumer, credit, accounting, kyc, kycOcr, mockMerchant, postgres, redis, kafka, minio] = await Promise.all([
+    const [assistantSettings] = await this.dataSource.query(
+      `SELECT api_key_ciphertext IS NOT NULL AS database_key_configured,model
+       FROM public.mr_finify_settings WHERE id=1`,
+    );
+    const assistantConfigured = Boolean(
+      assistantSettings?.database_key_configured
+      || this.config.get<string>('OPENAI_API_KEY'),
+    );
+    const assistantModel = assistantSettings?.model
+      || this.config.get<string>('OPENAI_MODEL')
+      || 'gpt-5.6-sol';
+    const [kong, adminUi, portalUi, consumer, credit, accounting, kyc, kycOcr, mockMerchant, postgres, redis, kafka, minio] = await Promise.all([
+      this.checkHttp('kong', 'Kong API gateway', 'External API routing, limits, and perimeter controls', 'APPLICATION', kongStatusUrl),
       this.checkHttp('admin-ui', 'Admin UI', 'Command and control interface', 'APPLICATION', adminUiUrl),
       this.checkHttp('portal-ui', 'Customer & business portal', 'Responsive wallet and payment experience', 'APPLICATION', portalUiUrl),
-      this.checkHttp('consumer', 'Consumer service', 'Transaction events and merchant integration', 'APPLICATION', `${consumerUrl.replace(/\/+$/, '')}/health`),
-      this.checkHttp('credit-rules', 'Credit rules', 'Policy evaluation and credit decisions', 'APPLICATION', `${creditUrl.replace(/\/+$/, '')}/health`),
-      this.checkHttp('accounting', 'Accounting service', 'Ledger, EOD, and financial reporting', 'APPLICATION', `${accountingUrl.replace(/\/+$/, '')}/health`),
-      this.checkHttp('kyc', 'KYC service', 'Identity cases, evidence, and review workflow', 'APPLICATION', `${kycUrl.replace(/\/+$/, '')}/health`),
+      this.checkHttp('consumer', 'Consumer service', 'Authenticated merchant integration readiness', 'APPLICATION', `${consumerUrl.replace(/\/+$/, '')}/v1/merchant-integrations/source-fields`, { 'x-admin-api-key': integrationKey }, false),
+      this.checkHttp('credit-rules', 'Credit rules', 'Authenticated policy administration readiness', 'APPLICATION', `${creditUrl.replace(/\/+$/, '')}/v1/credit-rule-masters?limit=1`, { 'x-api-key': creditKey, 'x-actor-id': 'system-pulse' }, false),
+      this.checkHttp('accounting', 'Accounting service', 'Authenticated ledger administration readiness', 'APPLICATION', `${accountingUrl.replace(/\/+$/, '')}/v1/accounting/configurations`, { 'x-admin-api-key': accountingKey }, false),
+      this.checkHttp('kyc', 'KYC service', 'Authenticated identity-case readiness', 'APPLICATION', `${kycUrl.replace(/\/+$/, '')}/cases?limit=1`, { 'x-admin-api-key': kycKey, 'x-actor-id': 'system-pulse' }, false),
       this.checkHttp('kyc-ocr', 'KYC OCR worker', 'Document OCR and biometric face comparison', 'APPLICATION', `${kycOcrUrl.replace(/\/+$/, '')}/health`),
       this.checkHttp('mock-merchant', 'Mock merchant', 'Two-leg merchant approval and rejection simulator', 'APPLICATION', `${mockMerchantUrl.replace(/\/+$/, '')}/health`),
       this.checkDatabase(),
@@ -64,6 +81,18 @@ export class AdminOperationsService {
         latency: 0,
         message: 'System Pulse endpoint is responding',
       },
+      {
+        id: 'mr-finify',
+        label: 'Mr. Finify',
+        detail: 'Role-scoped intelligent financial operations assistant',
+        category: 'APPLICATION',
+        state: assistantConfigured ? 'operational' : 'degraded',
+        latency: 0,
+        message: assistantConfigured
+          ? `OpenAI Responses connection configured with ${assistantModel}`
+          : 'Secure OpenAI API key configuration is required',
+      },
+      kong,
       adminUi,
       portalUi,
       consumer,
@@ -733,8 +762,24 @@ export class AdminOperationsService {
               concat_ws(' ',profile."First_Name",profile."Last_Name") AS name,
               profile."First_Name" AS "firstName",profile."Last_Name" AS "lastName",
               profile."Email" AS email,profile."ID_Number" AS "idNumber",
+              profile."ID_Type" AS "idType",
               profile."KYC_Status" AS "kycStatus",profile."Status" AS status,
               profile."Gender" AS gender,profile."DOB" AS dob,profile."Address" AS address,
+              profile."KYC_Case_ID" AS "kycCaseId",
+              profile."KYC_Verified_Date" AS "kycVerifiedAt",
+              profile."KYC_Verified_By" AS "kycVerifiedBy",
+              EXISTS(
+                SELECT 1 FROM public."SW_TBL_WALLET" required_wallet
+                JOIN public."SW_TBL_WALLET_TYPE" required_type
+                  ON required_type."Wallet_ID"=required_wallet."Wallet_Code"
+                WHERE required_wallet.owner_type='CUSTOMER'
+                  AND required_wallet.owner_msisdn=profile."MSISDN"
+                  AND required_type."Is_Kyc_Needed"
+              ) AS "kycRequired",
+              EXISTS(
+                SELECT 1 FROM kyc.cases linked_case
+                WHERE linked_case.customer_msisdn=profile."MSISDN"
+              ) AS "kycDataConnected",
               profile."Created_Date" AS "createdAt",
               scored.credit_score AS "creditScore",scored.customer_category AS category,
               scored.credit_limit AS "creditLimit",scored.current_credit_limit AS "availableLimit",
@@ -780,8 +825,24 @@ export class AdminOperationsService {
               concat_ws(' ',profile."First_Name",profile."Last_Name") AS name,
               profile."First_Name" AS "firstName",profile."Last_Name" AS "lastName",
               profile."Email" AS email,profile."ID_Number" AS "idNumber",
+              profile."ID_Type" AS "idType",
               profile."KYC_Status" AS "kycStatus",profile."Status" AS status,
               profile."Gender" AS gender,profile."DOB" AS dob,profile."Address" AS address,
+              profile."KYC_Case_ID" AS "kycCaseId",
+              profile."KYC_Verified_Date" AS "kycVerifiedAt",
+              profile."KYC_Verified_By" AS "kycVerifiedBy",
+              EXISTS(
+                SELECT 1 FROM public."SW_TBL_WALLET" required_wallet
+                JOIN public."SW_TBL_WALLET_TYPE" required_type
+                  ON required_type."Wallet_ID"=required_wallet."Wallet_Code"
+                WHERE required_wallet.owner_type='CUSTOMER'
+                  AND required_wallet.owner_msisdn=profile."MSISDN"
+                  AND required_type."Is_Kyc_Needed"
+              ) AS "kycRequired",
+              EXISTS(
+                SELECT 1 FROM kyc.cases linked_case
+                WHERE linked_case.customer_msisdn=profile."MSISDN"
+              ) AS "kycDataConnected",
               profile."Created_Date" AS "createdAt",
               scored.credit_score AS "creditScore",scored.customer_category AS category,
               scored.credit_limit AS "creditLimit",
@@ -862,11 +923,29 @@ export class AdminOperationsService {
         [customerId],
       ).catch(() => []),
       this.dataSource.query(
-        `SELECT id,status,document_type AS "documentType",issuing_country AS "issuingCountry",
-                system_recommendation AS "systemRecommendation",created_at AS "createdAt",
-                reviewed_at AS "reviewedAt"
-         FROM kyc.cases WHERE customer_msisdn=$1::bigint
-         ORDER BY created_at DESC LIMIT 1`,
+        `SELECT cases.id,cases.status,cases.document_type AS "documentType",
+                cases.issuing_country AS "issuingCountry",
+                cases.system_recommendation AS "systemRecommendation",
+                cases.face_match_score::numeric AS "faceMatchScore",
+                cases.aml_match AS "amlMatch",
+                cases.extracted_data-'rawText' AS "extractedData",
+                cases.screening_summary AS "screeningSummary",
+                cases.assigned_reviewer AS "assignedReviewer",
+                cases.final_reason AS "finalReason",
+                cases.created_by AS "createdBy",cases.reviewed_by AS "reviewedBy",
+                cases.created_at AS "createdAt",cases.updated_at AS "updatedAt",
+                cases.reviewed_at AS "reviewedAt",
+                COALESCE(documents.count,0)::int AS "documentCount",
+                COALESCE(documents.roles,'[]'::jsonb) AS "documentRoles"
+         FROM kyc.cases cases
+         LEFT JOIN LATERAL (
+           SELECT count(*)::int AS count,
+                  jsonb_agg(DISTINCT document_role) AS roles
+           FROM kyc.documents
+           WHERE case_id=cases.id AND deleted_at IS NULL
+         ) documents ON true
+         WHERE cases.customer_msisdn=$1::bigint
+         ORDER BY cases.created_at DESC LIMIT 20`,
         [customerId],
       ).catch(() => []),
     ]);
@@ -876,6 +955,7 @@ export class AdminOperationsService {
       decisions,
       accountOpening: openingRows[0] || null,
       latestKycCase: kycRows[0] || null,
+      kycCases: kycRows,
     };
   }
 
@@ -1475,11 +1555,13 @@ export class AdminOperationsService {
     detail: string,
     category: string,
     url: string,
+    headers: Record<string, string> = {},
+    includeMetadata = true,
   ) {
     const started = Date.now();
     try {
       const response = await fetch(url, {
-        headers: { accept: 'application/json' },
+        headers: { accept: 'application/json', ...headers },
         signal: AbortSignal.timeout(3500),
       });
       const text = await response.text();
@@ -1496,7 +1578,7 @@ export class AdminOperationsService {
         message: operational
           ? String(payload?.status || 'HTTP endpoint responding')
           : String(payload?.message || payload?.status || `HTTP ${response.status}`),
-        metadata: payload && typeof payload === 'object' ? payload : undefined,
+        metadata: includeMetadata && payload && typeof payload === 'object' ? payload : undefined,
       };
     } catch (error) {
       return {

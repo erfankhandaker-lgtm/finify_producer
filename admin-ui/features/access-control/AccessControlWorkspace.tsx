@@ -17,6 +17,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import styles from './AccessControlWorkspace.module.css';
+import { sessionFetch } from '../../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
 
@@ -59,11 +60,10 @@ const PERMISSION_LABELS: Record<string, string> = {
 };
 
 async function request<T>(route: string, token: string, init: { method?: string; body?: unknown } = {}) {
-  const response = await fetch(`${API_URL}${route}`, {
+  const response = await sessionFetch(`${API_URL}${route}`, {
     method: init.method || 'GET',
     cache: 'no-store',
     headers: {
-      authorization: `Bearer ${token}`,
       ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
     },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
@@ -458,8 +458,7 @@ function BiometricEnrollment({
     if (!enrolled) return;
     let active = true;
     let url = '';
-    void fetch(`${API_URL}/admin/access/users/${user.id}/biometric/photo`, {
-      headers: { authorization: `Bearer ${token}` },
+    void sessionFetch(`${API_URL}/admin/access/users/${user.id}/biometric/photo`, {
       cache: 'no-store',
     }).then(async (response) => {
       if (!response.ok) return;
@@ -547,9 +546,8 @@ function BiometricEnrollment({
     try {
       const body = new FormData();
       body.append('image', candidate);
-      const response = await fetch(`${API_URL}/admin/access/users/${user.id}/biometric`, {
+      const response = await sessionFetch(`${API_URL}/admin/access/users/${user.id}/biometric`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}` },
         body,
       });
       const raw = await response.json().catch(() => ({}));

@@ -10,11 +10,12 @@ import { readCredential } from './credential';
       useFactory: (config: ConfigService) => {
         const plain = config.get<string>('IS_CRD_PLAIN', 'true') === 'true';
         const credential = (key: string) => readCredential(config.get<string>(key), plain);
+        const mode = String(config.get<string>('NODE_MODE') || config.get<string>('NODE_ENV') || 'development').toLowerCase();
         const databaseKey = config.get<string>('DB_NAME')
           ? 'DB_NAME'
-          : config.get<string>('NODE_ENV') === 'production'
+          : ['prod', 'production'].includes(mode)
             ? 'DB_NAME_PRODUCTION'
-            : config.get<string>('NODE_ENV') === 'test' ? 'DB_NAME_TEST' : 'DB_NAME_DEVELOPMENT';
+            : mode === 'test' ? 'DB_NAME_TEST' : 'DB_NAME_DEVELOPMENT';
         return {
           type: 'postgres' as const,
           host: credential('DB_HOST') || 'localhost',

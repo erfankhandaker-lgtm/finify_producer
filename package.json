@@ -19,6 +19,10 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
+    "test:gateway": "node scripts/verify-gateway.js",
+    "test:transaction-security": "jest --runInBand src/modules/transaction/transaction-security-regression.spec.ts src/modules/transaction/transaction-request.service.spec.ts src/modules/transaction/aml-transaction.service.spec.ts src/modules/transaction/password.service.spec.ts src/helpers/session-cookie.spec.ts",
+    "migrate": "node scripts/migrate.js",
+    "kyc:backfill-cases": "node scripts/backfill-customer-kyc-cases.js",
     "test:transaction-e2e": "node scripts/run-transaction-e2e.js",
     "admin:create": "ts-node -r tsconfig-paths/register scripts/create-admin.ts"
   },

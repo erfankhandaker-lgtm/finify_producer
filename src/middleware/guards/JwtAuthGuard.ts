@@ -2,6 +2,7 @@ import {Injectable,UnauthorizedException, ExecutionContext } from '@nestjs/commo
 import { AuthGuard } from '@nestjs/passport';
 import {JsonWebTokenError} from 'jsonwebtoken'
 import {UNAUTHORIZED} from '../../helpers/responseHelper'
+import { assertCookieCsrf, CUSTOMER_ACCESS_COOKIE, CUSTOMER_CSRF_COOKIE } from '../../helpers/session-cookie';
 
 
 @Injectable()
@@ -11,6 +12,11 @@ export  class JwtAuthGuard extends AuthGuard('jwt') {
     // Add your custom authentication logic here
     // for example, call super.logIn(request) to establish a session.
      this.context = context
+    assertCookieCsrf(
+      context.switchToHttp().getRequest(),
+      CUSTOMER_ACCESS_COOKIE,
+      CUSTOMER_CSRF_COOKIE,
+    );
     return super.canActivate(context);
   }
   handleRequest(err: any, user: any, info: any, context: any, status: any) {

@@ -127,17 +127,44 @@ export class WalletService {
         const kycRequired = this.requiresKyc(walletType.isKycNeeded);
         const approvedKyc = kycRequired ? await this.approvedKycCase(manager, owner) : null;
         if (kycRequired && !approvedKyc) {
+          const [existingKycCase] = await manager.query(
+            `SELECT id,status,document_type AS "documentType",issuing_country AS "issuingCountry"
+             FROM kyc.cases
+             WHERE customer_msisdn=$1::bigint
+               AND status NOT IN ('REJECTED','FAILED')
+             ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+            [owner],
+          );
+          const [createdKycCase] = existingKycCase ? [null] : await manager.query(
+            `INSERT INTO kyc.cases(
+               customer_msisdn,document_type,issuing_country,created_by)
+             VALUES($1::bigint,$2,$3,$4)
+             RETURNING id,status,document_type AS "documentType",issuing_country AS "issuingCountry"`,
+            [owner, dto.documentType || 'UGANDA_NATIONAL_ID', dto.issuingCountry || 'UGA', actor],
+          );
+          const kycCase = existingKycCase || createdKycCase;
+          if (!kycCase) throw new ConflictException('Unable to create the required KYC case');
+          if (createdKycCase) {
+            await manager.query(
+              `INSERT INTO kyc.review_audit(
+                 case_id,action,previous_status,new_status,reason,actor_id)
+               VALUES($1::uuid,'CREATE',NULL,'DRAFT','Created automatically for KYC-required account opening',$2)`,
+              [createdKycCase.id, actor],
+            );
+          }
           const [opening] = await manager.query(
             `INSERT INTO public.customer_account_opening_requests(
-               customer_msisdn,wallet_code,currency,iban,swift_bic,kyc_required,status,requested_by)
-             VALUES($1::bigint,$2,$3,$4,$5,true,'PENDING_KYC',$6)
+               customer_msisdn,wallet_code,currency,iban,swift_bic,kyc_required,kyc_case_id,status,requested_by)
+             VALUES($1::bigint,$2,$3,$4,$5,true,$6::uuid,'PENDING_KYC',$7)
              ON CONFLICT(customer_msisdn) DO UPDATE SET
                wallet_code=EXCLUDED.wallet_code,currency=EXCLUDED.currency,iban=EXCLUDED.iban,
-               swift_bic=EXCLUDED.swift_bic,kyc_required=true,status='PENDING_KYC',
+               swift_bic=EXCLUDED.swift_bic,kyc_required=true,kyc_case_id=EXCLUDED.kyc_case_id,
+               status='PENDING_KYC',
                requested_by=EXCLUDED.requested_by,updated_at=CURRENT_TIMESTAMP
              WHERE customer_account_opening_requests.status<>'OPENED'
-             RETURNING id,status,wallet_code AS "walletCode",currency,kyc_required AS "kycRequired"`,
-            [owner, walletCode, currency, routing.iban, routing.swiftBic, actor],
+             RETURNING id,status,wallet_code AS "walletCode",currency,
+                       kyc_required AS "kycRequired",kyc_case_id AS "kycCaseId"`,
+            [owner, walletCode, currency, routing.iban, routing.swiftBic, kycCase.id, actor],
           );
           if (!opening) throw new ConflictException('Customer account opening is already complete');
           await this.customerAudit(
@@ -150,7 +177,13 @@ export class WalletService {
             accountOpening: {
               ...opening,
               walletName: walletType.walletName,
-              message: 'Customer profile created. Complete and approve KYC, then complete account opening.',
+              kycCase: {
+                id: kycCase.id,
+                status: kycCase.status,
+                documentType: kycCase.documentType,
+                issuingCountry: kycCase.issuingCountry,
+              },
+              message: 'Customer profile and linked KYC case created. Upload evidence, approve KYC, then complete account opening.',
             },
           };
         }

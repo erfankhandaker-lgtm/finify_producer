@@ -38,9 +38,9 @@ export class AdminMfaRecoveryDto extends AdminMfaChallengeDto {
 }
 
 export class AdminRefreshDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  refreshToken: string;
+  refreshToken?: string;
 }
 
 export class AdminFaceChallengeDto {

@@ -24,7 +24,7 @@ function scheduler({ periodState, outcomes = [] }) {
   };
   const dataSource = {
     query: async sql => {
-      if (sql.includes('UPDATE public.sw_tbl_eod_schedule SET') && sql.includes('RETURNING')) {
+      if (sql.includes('FROM public.sw_tbl_eod_schedule') && sql.includes('lease_owner=$2')) {
         return [{ reportingEntity: 'FINIFY_UK', enabled: true, businessTimezone: 'Europe/London', closureTime: '00:05:00' }];
       }
       if (sql.includes('FROM public.sw_tbl_accounting_period')) return [periodState];

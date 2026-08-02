@@ -9,7 +9,9 @@ export class IntegrationAdminGuard implements CanActivate {
 
   constructor(config: ConfigService) {
     this.expected = config.get<string>('INTEGRATION_ADMIN_API_KEY');
-    this.production = config.get<string>('NODE_ENV') === 'production';
+    this.production = ['prod', 'production'].includes(String(
+      config.get<string>('NODE_MODE') || config.get<string>('NODE_ENV') || 'development',
+    ).toLowerCase());
   }
 
   canActivate(context: ExecutionContext): boolean {

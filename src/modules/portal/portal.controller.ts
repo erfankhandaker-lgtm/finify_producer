@@ -1,5 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException, Body, Controller, Get, Param, Patch, Post, Query, Req,
+  UploadedFile, UseGuards, UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { Request } from 'express';
+import { memoryStorage } from 'multer';
 import { JwtAuthGuard } from '../../middleware/guards';
 import { ChangePortalPinDto, PortalActivityQueryDto, PortalPaymentDto } from './dto/portal.dto';
 import { PortalService } from './portal.service';
@@ -24,6 +29,28 @@ export class PortalController {
   }
 
   @Get('services') services() { return this.portal.services(); }
+
+  @Get('kyc') kyc(@Req() request: PortalRequest) {
+    return this.portal.kycJourney(request.user.username);
+  }
+
+  @Post('kyc/documents')
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024, files: 1 },
+  }))
+  uploadKycDocument(
+    @Req() request: PortalRequest,
+    @Body('role') role: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
+    if (!file) throw new BadRequestException('Select a KYC document image');
+    return this.portal.uploadKycDocument(request.user.username, role, file);
+  }
+
+  @Post('kyc/verify') verifyKyc(@Req() request: PortalRequest) {
+    return this.portal.verifyKyc(request.user.username);
+  }
 
   @Post('payments') payment(@Req() request: PortalRequest, @Body() input: PortalPaymentDto) {
     return this.portal.payment(request.user.username, input);

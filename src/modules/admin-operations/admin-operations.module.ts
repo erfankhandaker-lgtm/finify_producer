@@ -11,5 +11,6 @@ import { TreasuryDocumentService } from './treasury-document.service';
   imports: [AdminAuthModule, TransactionModule, PricingFlowModule, RedisModule],
   controllers: [AdminOperationsController],
   providers: [AdminOperationsService, TreasuryDocumentService],
+  exports: [AdminOperationsService],
 })
 export class AdminOperationsModule {}

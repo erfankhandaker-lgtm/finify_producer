@@ -26,6 +26,7 @@ export class CreateAdditionalWalletDto {
 
   @ApiPropertyOptional({ example: 'DEUTDEFF500' })
   @IsOptional() @IsString() @MaxLength(16) swiftBic?: string;
+
 }
 
 export class CreateCustomerWithWalletDto {
@@ -56,6 +57,14 @@ export class CreateCustomerWithWalletDto {
 
   @ApiPropertyOptional({ example: 'DEUTDEFF500' })
   @IsOptional() @IsString() @MaxLength(16) swiftBic?: string;
+
+  @ApiPropertyOptional({ enum: ['UGANDA_NATIONAL_ID', 'PASSPORT'], default: 'UGANDA_NATIONAL_ID' })
+  @IsOptional() @IsIn(['UGANDA_NATIONAL_ID', 'PASSPORT']) documentType?: string;
+
+  @ApiPropertyOptional({ example: 'UGA', default: 'UGA' })
+  @IsOptional()
+  @Transform(({ value }) => String(value).trim().toUpperCase())
+  @Matches(/^[A-Z]{3}$/) issuingCountry?: string;
 }
 
 export class UpdateWalletRoutingDto {

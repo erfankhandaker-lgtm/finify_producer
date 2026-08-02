@@ -1,0 +1,137 @@
+_format_version: "3.0"
+_transform: true
+
+services:
+  - name: finify-producer
+    url: http://producer:5002
+    connect_timeout: 5000
+    read_timeout: 65000
+    write_timeout: 65000
+    retries: 1
+    routes:
+      - name: producer-health
+        paths:
+          - /finify/hello
+        methods:
+          - GET
+          - HEAD
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 60
+              policy: local
+              fault_tolerant: false
+
+      - name: customer-auth
+        paths:
+          - /finify/auth
+        methods:
+          - GET
+          - POST
+          - OPTIONS
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 10
+              policy: local
+              fault_tolerant: false
+
+      - name: admin-auth
+        paths:
+          - /finify/admin/auth
+        methods:
+          - GET
+          - POST
+          - PATCH
+          - DELETE
+          - OPTIONS
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 30
+              policy: local
+              fault_tolerant: false
+
+      - name: admin-api
+        paths:
+          - /finify/admin/access
+          - /finify/admin/operations
+          - /finify/admin/reference-data
+          - /finify/admin/wallets
+          - /finify/admin/assistant
+        methods:
+          - GET
+          - POST
+          - PUT
+          - PATCH
+          - DELETE
+          - OPTIONS
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 300
+              policy: local
+              fault_tolerant: false
+
+      - name: customer-portal
+        paths:
+          - /finify/portal
+          - /finify/wallets
+        methods:
+          - GET
+          - POST
+          - PATCH
+          - OPTIONS
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 180
+              policy: local
+              fault_tolerant: false
+
+  - name: finify-merchant-confirmation
+    url: http://consumer:5003
+    connect_timeout: 5000
+    read_timeout: 65000
+    write_timeout: 65000
+    retries: 0
+    routes:
+      - name: merchant-confirmation
+        paths:
+          - /v1/merchant-confirmations
+        methods:
+          - POST
+        strip_path: false
+        plugins:
+          - name: rate-limiting
+            config:
+              minute: 120
+              policy: local
+              fault_tolerant: false
+
+plugins:
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true
+
+  - name: request-size-limiting
+    config:
+      allowed_payload_size: 10
+      size_unit: megabytes
+      require_content_length: false
+
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - X-Content-Type-Options:nosniff
+          - X-Frame-Options:DENY
+          - Referrer-Policy:no-referrer
+          - Permissions-Policy:camera=(), microphone=(), geolocation=()

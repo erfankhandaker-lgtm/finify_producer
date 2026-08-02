@@ -372,6 +372,16 @@ export class AdminOperationsController {
     @Query() query: Record<string, unknown>,
     @Body() body: unknown,
   ) {
+    const method = request.method.toUpperCase();
+    if (!['GET', 'HEAD'].includes(method)) {
+      const required = /(?:approve|activate|reject|retire)(?:\/|$)/i.test(
+        Array.isArray(path) ? path.join('/') : path,
+      ) ? 'credit_rules.check' : 'credit_rules.make';
+      if (!request.user.roles?.includes('super_admin')
+        && !request.user.permissions?.includes(required)) {
+        throw new ForbiddenException(`${required} permission is required`);
+      }
+    }
     return this.operations.proxy(
       'credit',
       Array.isArray(path) ? path.join('/') : path,

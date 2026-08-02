@@ -64,10 +64,9 @@ import type {
 import ReferenceDataWorkspace from '../features/reference-data/ReferenceDataWorkspace';
 import type { ReferenceDataRequest } from '../features/reference-data/ReferenceDataWorkspace';
 import KycWorkspace from '../features/kyc/KycWorkspace';
+import { sessionFetch } from '../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
-const ACCESS_TOKEN_KEY = 'finify_access_token';
-const REFRESH_TOKEN_KEY = 'finify_refresh_token';
 const DEFAULT_TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || '1x00000000000000000000AA';
 
 type SetupStatus = {
@@ -82,6 +81,32 @@ type AdminProfile = {
   email?: string;
   roles?: string[];
   permissions?: string[];
+};
+
+type MrFinifyAction = {
+  type: 'navigate';
+  moduleId: string;
+  label: string;
+};
+
+type MrFinifyMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  actions?: MrFinifyAction[];
+  toolsUsed?: string[];
+  error?: boolean;
+};
+
+type MrFinifyStatus = {
+  configured: boolean;
+  state: 'READY' | 'CONFIGURATION_REQUIRED';
+  accessScope: 'SUPERADMIN' | 'ROLE_SCOPED';
+  model?: string | null;
+  toolCount: number;
+  tools: string[];
+  message: string;
+  writeToolsEnabled: boolean;
 };
 
 type WalletRow = {
@@ -187,6 +212,15 @@ type CustomerRow = {
   lastName?: string;
   email?: string;
   address?: string;
+  idType?: string;
+  idNumber?: string;
+  gender?: string;
+  dob?: string;
+  kycCaseId?: string;
+  kycVerifiedAt?: string;
+  kycVerifiedBy?: string;
+  kycRequired?: boolean;
+  kycDataConnected?: boolean;
   status: number;
   kycStatus?: number;
   creditScore?: number;
@@ -197,6 +231,25 @@ type CustomerRow = {
   walletCount: number;
   walletBalance: number | string;
   walletBalances?: WalletBalanceGroup[];
+};
+
+type CustomerKycCase = {
+  id: string;
+  status: string;
+  documentType?: string;
+  issuingCountry?: string;
+  systemRecommendation?: string;
+  faceMatchScore?: number | string;
+  amlMatch?: boolean;
+  extractedData?: Record<string, unknown>;
+  screeningSummary?: Record<string, unknown>;
+  finalReason?: string;
+  createdBy?: string;
+  reviewedBy?: string;
+  createdAt?: string;
+  reviewedAt?: string;
+  documentCount?: number;
+  documentRoles?: string[];
 };
 
 type CustomerDecisionRow = {
@@ -223,13 +276,8 @@ type CustomerDetail = {
     kycCaseId?: string;
     walletId?: string;
   } | null;
-  latestKycCase?: {
-    id: string;
-    status: string;
-    documentType?: string;
-    issuingCountry?: string;
-    systemRecommendation?: string;
-  } | null;
+  latestKycCase?: CustomerKycCase | null;
+  kycCases: CustomerKycCase[];
 };
 
 type CustomerWalletType = {
@@ -358,7 +406,7 @@ async function fetchSetupStatus(): Promise<SetupStatus> {
   const controller = new AbortController();
   const timeout = globalThis.setTimeout(() => controller.abort(), 5000);
   try {
-    const response = await fetch(`${API_URL}/admin/auth/setup/status`, {
+    const response = await sessionFetch(`${API_URL}/admin/auth/setup/status`, {
       cache: 'no-store',
       signal: controller.signal,
     });
@@ -382,9 +430,8 @@ function unwrap<T>(raw: unknown): T {
 }
 
 async function authenticatedFetch<T>(route: string, token: string): Promise<T> {
-  const response = await fetch(`${API_URL}${route}`, {
+  const response = await sessionFetch(`${API_URL}${route}`, {
     cache: 'no-store',
-    headers: { authorization: `Bearer ${token}` },
   });
   if (!response.ok) throw new Error(String(response.status));
   return unwrap<T>(await response.json());
@@ -395,11 +442,10 @@ async function adminRequest<T>(
   token: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const response = await fetch(`${API_URL}${route}`, {
+  const response = await sessionFetch(`${API_URL}${route}`, {
     method: init.method || 'GET',
     cache: 'no-store',
     headers: {
-      authorization: `Bearer ${token}`,
       accept: 'application/json',
       ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
     },
@@ -428,11 +474,13 @@ export default function AdminPortal() {
       setScreen('setup');
       return;
     }
-    const storedToken = sessionStorage.getItem(ACCESS_TOKEN_KEY) || '';
-    if (status.state === 'configured' && storedToken) {
-      setToken(storedToken);
-      setScreen('portal');
-      return;
+    if (status.state === 'configured') {
+      const session = await sessionFetch(`${API_URL}/admin/auth/me`, { cache: 'no-store' });
+      if (session.ok) {
+        setToken('cookie-session');
+        setScreen('portal');
+        return;
+      }
     }
     setScreen('login');
   }, []);
@@ -442,10 +490,8 @@ export default function AdminPortal() {
     return () => window.clearTimeout(timer);
   }, [resolveEntry]);
 
-  const acceptSession = (accessToken: string, refreshToken?: string) => {
-    sessionStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
-    if (refreshToken) sessionStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
-    setToken(accessToken);
+  const acceptSession = () => {
+    setToken('cookie-session');
     setScreen('portal');
   };
 
@@ -460,8 +506,6 @@ export default function AdminPortal() {
     <CommandCenter
       token={token}
       onExpired={() => {
-        sessionStorage.removeItem(ACCESS_TOKEN_KEY);
-        sessionStorage.removeItem(REFRESH_TOKEN_KEY);
         setToken('');
         setScreen('login');
       }}
@@ -510,7 +554,7 @@ function LoginExperience({
   const [captchaSettings, setCaptchaSettings] = useState({ enabled: true, siteKey: DEFAULT_TURNSTILE_SITE_KEY });
 
   useEffect(() => {
-    void fetch(`${API_URL}/admin/auth/security/bootstrap`, { cache: 'no-store' })
+    void sessionFetch(`${API_URL}/admin/auth/security/bootstrap`, { cache: 'no-store' })
       .then((response) => response.json())
       .then((raw) => {
         const data = unwrap<{ captchaEnabled?: boolean; turnstileSiteKey?: string }>(raw);
@@ -523,7 +567,7 @@ function LoginExperience({
   }, []);
 
   const startEnrollment = async (id: string) => {
-    const response = await fetch(`${API_URL}/admin/auth/mfa/enrollment/start`, {
+    const response = await sessionFetch(`${API_URL}/admin/auth/mfa/enrollment/start`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: id }),
     });
     const data = unwrap<{ qrCodeDataUrl?: string; manualKey?: string; message?: string }>(await response.json());
@@ -539,7 +583,7 @@ function LoginExperience({
     setSubmitting(true);
     setError('');
     try {
-      const response = await fetch(`${API_URL}/admin/auth/login`, {
+      const response = await sessionFetch(`${API_URL}/admin/auth/login`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ username: username.trim(), password, ...(captchaSettings.enabled ? { captchaToken } : {}) }),
@@ -571,16 +615,16 @@ function LoginExperience({
     setError('');
     try {
       const route = step === 'enroll' ? 'mfa/enrollment/confirm' : 'mfa/verify';
-      const response = await fetch(`${API_URL}/admin/auth/${route}`, {
+      const response = await sessionFetch(`${API_URL}/admin/auth/${route}`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId, code }),
       });
-      const data = unwrap<{ accessToken?: string; refreshToken?: string; recoveryPin?: string; message?: string }>(await response.json());
-      if (!response.ok || !data.accessToken) throw new Error(data.message || 'Authenticator verification was not accepted.');
+      const data = unwrap<{ authenticated?: boolean; recoveryPin?: string; message?: string }>(await response.json());
+      if (!response.ok || !data.authenticated) throw new Error(data.message || 'Authenticator verification was not accepted.');
       if (data.recoveryPin) {
         setRecoveryPin(data.recoveryPin);
-        setPendingSession({ accessToken: data.accessToken, refreshToken: data.refreshToken });
+        setPendingSession({ accessToken: 'cookie-session' });
         setStep('recovery-pin');
-      } else onLogin(data.accessToken, data.refreshToken);
+      } else onLogin('cookie-session');
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Authenticator verification was not accepted.');
     } finally {
@@ -591,7 +635,7 @@ function LoginExperience({
   const recover = async (event: FormEvent) => {
     event.preventDefault(); setSubmitting(true); setError('');
     try {
-      const response = await fetch(`${API_URL}/admin/auth/mfa/recover`, {
+      const response = await sessionFetch(`${API_URL}/admin/auth/mfa/recover`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId, recoveryPin }),
       });
       const data = unwrap<{ message?: string }>(await response.json());
@@ -752,7 +796,7 @@ function SetupExperience({
     if (!valid) return;
     setSubmitting(true);
     try {
-      const response = await fetch(`${API_URL}/admin/auth/setup/initialize`, {
+      const response = await sessionFetch(`${API_URL}/admin/auth/setup/initialize`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -763,14 +807,14 @@ function SetupExperience({
           setupToken: form.setupToken || undefined,
         }),
       });
-      const data = unwrap<{ accessToken?: string; refreshToken?: string; message?: string }>(
+      const data = unwrap<{ authenticated?: boolean; message?: string }>(
         await response.json(),
       );
-      if (!response.ok || !data.accessToken) {
+      if (!response.ok || !data.authenticated) {
         throw new Error(data.message || 'Setup could not be completed.');
       }
       setStep(3);
-      window.setTimeout(() => onComplete(data.accessToken!, data.refreshToken), 900);
+      window.setTimeout(() => onComplete('cookie-session'), 900);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Setup failed.');
     } finally {
@@ -908,6 +952,7 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
   const [sidebarCompact, setSidebarCompact] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [profile, setProfile] = useState<AdminProfile>({});
   const [metrics, setMetrics] = useState<CommandCenterMetrics | null>(null);
   const [loading, setLoading] = useState(true);
@@ -916,6 +961,7 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
   const [pulseError, setPulseError] = useState('');
   const [services, setServices] = useState<ServiceHealth[]>([
     { id: 'producer', label: 'Producer API', detail: 'Core transaction and administration API', category: 'APPLICATION', state: 'checking' },
+    { id: 'mr-finify', label: 'Mr. Finify', detail: 'Role-scoped intelligent financial operations assistant', category: 'APPLICATION', state: 'checking' },
     { id: 'admin-ui', label: 'Admin UI', detail: 'Command and control interface', category: 'APPLICATION', state: 'checking' },
     { id: 'portal-ui', label: 'Customer & business portal', detail: 'Responsive wallet and payment experience', category: 'APPLICATION', state: 'checking' },
     { id: 'consumer', label: 'Consumer service', detail: 'Transaction events and merchant integration', category: 'APPLICATION', state: 'checking' },
@@ -939,6 +985,7 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
       if (event.key === 'Escape') {
         setPaletteOpen(false);
         setNotificationsOpen(false);
+        setAssistantOpen(false);
       }
     };
     window.addEventListener('keydown', keyboard);
@@ -1020,9 +1067,8 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
 
   const logout = async () => {
     try {
-      await fetch(`${API_URL}/admin/auth/logout`, {
+      await sessionFetch(`${API_URL}/admin/auth/logout`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}` },
       });
     } finally {
       onExpired();
@@ -1087,6 +1133,7 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
             <button className="command-search" onClick={() => setPaletteOpen(true)}>
               <Search /><span>Search or execute a command</span><kbd>⌘ K</kbd>
             </button>
+            {(profile.roles?.includes('super_admin') || profile.permissions?.includes('assistant.use')) && <button className="mr-finify-launch" onClick={() => setAssistantOpen(true)}><Sparkles /><span>MR. FINIFY</span><i /></button>}
             <span className="utc-clock"><Clock3 /> UTC+1</span>
             <div className="notification-wrap">
               <button className="icon-button notification-button" onClick={() => setNotificationsOpen(!notificationsOpen)} aria-label="Notifications"><Bell /><i /></button>
@@ -1134,17 +1181,145 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
 
       {sidebarOpen && <button className="sidebar-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
       {paletteOpen && <CommandPalette profile={profile} onClose={() => setPaletteOpen(false)} onNavigate={(id) => { setActive(id); setPaletteOpen(false); }} />}
+      {assistantOpen && <MrFinifyDrawer token={token} profile={profile} activeModule={active} onClose={() => setAssistantOpen(false)} onNavigate={(moduleId) => { setActive(moduleId); setSidebarOpen(false); }} />}
     </main>
   );
 }
 
-function TreasuryDatePicker({
+function MrFinifyDrawer({
+  token,
+  profile,
+  activeModule,
+  onClose,
+  onNavigate,
+}: {
+  token: string;
+  profile: AdminProfile;
+  activeModule: string;
+  onClose: () => void;
+  onNavigate: (moduleId: string) => void;
+}) {
+  const [status, setStatus] = useState<MrFinifyStatus | null>(null);
+  const [messages, setMessages] = useState<MrFinifyMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const firstName = (profile.displayName || profile.username || 'Administrator').split(' ')[0];
+  const suggestions = activeModule === 'accounting'
+    ? ['Show the latest EOD status', 'Check the general ledger balance', 'Open the Accounting workspace']
+    : activeModule === 'customers'
+      ? ['Show recent customers', 'Find a customer by MSISDN', 'Open Customer management']
+      : activeModule === 'transactions'
+        ? ['Show recent failed transactions', 'Check completed transactions', 'Open Transactions']
+        : ['Give me the system overview', 'Show pending approvals', 'What can I do with my access?'];
+
+  useEffect(() => {
+    void adminRequest<MrFinifyStatus>('/admin/assistant/status', token)
+      .then(setStatus)
+      .catch((error) => setMessages([{ id: 'status-error', role: 'assistant', content: (error as Error).message, error: true }]));
+    window.setTimeout(() => inputRef.current?.focus(), 80);
+  }, [token]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, sending]);
+
+  const send = async (value = input) => {
+    const content = value.trim();
+    if (!content || sending) return;
+    const userMessage: MrFinifyMessage = { id: `user-${Date.now()}`, role: 'user', content };
+    const history = messages.filter((message) => !message.error).slice(-10).map((message) => ({ role: message.role, content: message.content }));
+    setMessages((current) => [...current, userMessage]);
+    setInput('');
+    setSending(true);
+    try {
+      const result = await adminRequest<{
+        configured: boolean;
+        accessScope: 'SUPERADMIN' | 'ROLE_SCOPED';
+        message: string;
+        actions?: MrFinifyAction[];
+        toolsUsed?: string[];
+      }>('/admin/assistant/chat', token, {
+        method: 'POST',
+        body: { message: content, activeModule, history },
+      });
+      setMessages((current) => [...current, {
+        id: `assistant-${Date.now()}`,
+        role: 'assistant',
+        content: result.message,
+        actions: result.actions || [],
+        toolsUsed: result.toolsUsed || [],
+      }]);
+      if (!result.configured) setStatus((current) => current ? { ...current, configured: false, state: 'CONFIGURATION_REQUIRED' } : current);
+    } catch (error) {
+      setMessages((current) => [...current, { id: `error-${Date.now()}`, role: 'assistant', content: (error as Error).message, error: true }]);
+    } finally {
+      setSending(false);
+      window.setTimeout(() => inputRef.current?.focus(), 0);
+    }
+  };
+
+  return (
+    <div className="mr-finify-layer" role="dialog" aria-modal="true" aria-label="Mr. Finify assistant">
+      <button className="mr-finify-backdrop" onClick={onClose} aria-label="Close Mr. Finify" />
+      <aside className="mr-finify-drawer">
+        <header className="mr-finify-head">
+          <div className="mr-finify-mark"><Sparkles /><i /></div>
+          <div><span>FINIFY INTELLIGENCE</span><h2>Mr. Finify</h2><p>Your intelligent financial operations assistant</p></div>
+          <button className="icon-button" onClick={onClose} aria-label="Close Mr. Finify"><X /></button>
+        </header>
+        <div className="mr-finify-security">
+          <span className={status?.configured ? 'ready' : 'waiting'}><i />{status?.configured ? 'SECURE LINK ACTIVE' : 'CONFIGURATION REQUIRED'}</span>
+          <strong><ShieldCheck /> {status?.accessScope === 'SUPERADMIN' ? 'PRIVILEGED COMMAND MODE' : 'ROLE-SCOPED ASSISTANCE'}</strong>
+          <small>{status?.toolCount ?? 0} authorised tools · writes require protected UI workflows</small>
+        </div>
+        <div className="mr-finify-thread" ref={scrollRef}>
+          {!messages.length && <div className="mr-finify-welcome">
+            <div><Sparkles /></div>
+            <span>GOOD {new Date().getHours() < 12 ? 'MORNING' : new Date().getHours() < 18 ? 'AFTERNOON' : 'EVENING'}, {firstName.toUpperCase()}</span>
+            <h3>How can I assist?</h3>
+            <p>I can inspect live Finify operations and guide you through the functions authorised for your account.</p>
+            {!status?.configured && status && <div className="mr-finify-config-note"><AlertTriangle /><p>{status.message}</p></div>}
+            <div className="mr-finify-suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => void send(suggestion)}><Command /><span>{suggestion}</span><ChevronRight /></button>)}</div>
+          </div>}
+          {messages.map((message) => <div className={`mr-finify-message ${message.role} ${message.error ? 'error' : ''}`} key={message.id}>
+            <div className="mr-finify-message-author">{message.role === 'assistant' ? <><Sparkles /><span>MR. FINIFY</span></> : <><Avatar name={profile.displayName || profile.username || 'Administrator'} small /><span>YOU</span></>}</div>
+            <p>{message.content}</p>
+            {Boolean(message.toolsUsed?.length) && <small className="mr-finify-evidence"><Database /> VERIFIED WITH {message.toolsUsed?.map((tool) => tool.replaceAll('_', ' ')).join(' · ')}</small>}
+            {Boolean(message.actions?.length) && <div className="mr-finify-actions">{message.actions?.map((action) => <button key={`${message.id}-${action.moduleId}`} onClick={() => onNavigate(action.moduleId)}><ArrowRight /> {action.label}</button>)}</div>}
+          </div>)}
+          {sending && <div className="mr-finify-message assistant thinking"><div className="mr-finify-message-author"><Sparkles /><span>MR. FINIFY</span></div><p><LoaderCircle className="spin" /> Inspecting authorised Finify controls…</p></div>}
+        </div>
+        <footer className="mr-finify-composer">
+          <div className="mr-finify-context"><span><Activity /> CONTEXT: {activeModule.replaceAll('-', ' ').toUpperCase()}</span>{messages.length > 0 && <button onClick={() => setMessages([])}>CLEAR SESSION</button>}</div>
+          <div className="mr-finify-input">
+            <textarea ref={inputRef} rows={2} maxLength={4000} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder="Ask Mr. Finify about this workspace…" />
+            <button disabled={!input.trim() || sending} onClick={() => void send()} aria-label="Send message">{sending ? <LoaderCircle className="spin" /> : <ArrowRight />}</button>
+          </div>
+          <p><LockKeyhole /> Responses operate within your authenticated permissions. Sensitive actions remain subject to confirmation and maker-checker control.</p>
+        </footer>
+      </aside>
+    </div>
+  );
+}
+
+function ThemedDatePicker({
   value,
   onChange,
+  placeholder = 'Select date',
+  contextLabel = 'BUSINESS DATE',
 }: {
   value: string;
   onChange: (value: string) => void;
+  placeholder?: string;
+  contextLabel?: string;
 }) {
+  const localIso = (date: Date) => [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
   const selected = value
     ? new Date(`${value}T00:00:00`)
     : new Date();
@@ -1163,7 +1338,7 @@ function TreasuryDatePicker({
       month: 'short',
       year: 'numeric',
     }).format(selected)
-    : 'Select value date';
+    : placeholder;
   const mondayOffset = (month.getDay() + 6) % 7;
   const calendarStart = new Date(
     month.getFullYear(),
@@ -1182,7 +1357,7 @@ function TreasuryDatePicker({
       date,
       iso,
       currentMonth: date.getMonth() === month.getMonth(),
-      today: iso === new Date().toISOString().slice(0, 10),
+      today: iso === localIso(new Date()),
     };
   });
   const choose = (iso: string) => {
@@ -1193,9 +1368,17 @@ function TreasuryDatePicker({
     setMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
     setOpen(true);
   };
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [open]);
 
   return (
-    <div className="treasury-date-picker">
+    <div className="treasury-date-picker" onClick={(event) => event.stopPropagation()}>
       <button
         type="button"
         className="treasury-date-trigger"
@@ -1215,7 +1398,7 @@ function TreasuryDatePicker({
             aria-label="Close calendar"
             onClick={() => setOpen(false)}
           />
-          <div className="treasury-calendar" role="dialog" aria-label="Choose value date">
+          <div className="treasury-calendar" role="dialog" aria-label={`Choose ${contextLabel.toLowerCase()}`}>
             <div className="treasury-calendar-head">
               <button
                 type="button"
@@ -1263,11 +1446,11 @@ function TreasuryDatePicker({
             <div className="treasury-calendar-foot">
               <button
                 type="button"
-                onClick={() => choose(new Date().toISOString().slice(0, 10))}
+                onClick={() => choose(localIso(new Date()))}
               >
                 TODAY
               </button>
-              <span>VALUE DATE / BANK SETTLEMENT</span>
+              <span>{contextLabel}</span>
             </div>
           </div>
         </>
@@ -1380,12 +1563,11 @@ function Dashboard({
     try {
       const uploadBody = new FormData();
       uploadBody.append('file', fundingFile);
-      const uploadResponse = await fetch(
+      const uploadResponse = await sessionFetch(
         `${API_URL}/admin/operations/treasury-documents`,
         {
           method: 'POST',
           headers: {
-            authorization: `Bearer ${token}`,
             accept: 'application/json',
           },
           body: uploadBody,
@@ -1608,7 +1790,7 @@ function Dashboard({
             <label>BANK NAME<input placeholder="Bank name" value={fundingForm.bankName} onChange={(event) => setFundingForm({ ...fundingForm, bankName: event.target.value })} /></label>
             <label>BANK ACCOUNT / IBAN<input placeholder="Source or beneficiary account" value={fundingForm.bankAccount} onChange={(event) => setFundingForm({ ...fundingForm, bankAccount: event.target.value })} /></label>
             <label>BANK TRANSACTION REFERENCE<input placeholder="BANK-2026-001" value={fundingForm.reference} onChange={(event) => setFundingForm({ ...fundingForm, reference: event.target.value.toUpperCase().replace(/[^A-Z0-9._/-]/g, '') })} /></label>
-            <label>VALUE DATE<TreasuryDatePicker value={fundingForm.valueDate} onChange={(value) => setFundingForm({ ...fundingForm, valueDate: value })} /></label>
+            <div className="themed-date-field"><span>VALUE DATE</span><ThemedDatePicker value={fundingForm.valueDate} onChange={(value) => setFundingForm({ ...fundingForm, valueDate: value })} placeholder="Select value date" contextLabel="VALUE DATE / BANK SETTLEMENT" /></div>
             <label>BANK TRANSACTION DOCUMENT<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => setFundingFile(event.target.files?.[0] || null)} /><small>{fundingFile ? `${fundingFile.name} · ${(fundingFile.size / 1024 / 1024).toFixed(2)} MB` : 'PDF, PNG, or JPEG · maximum 10 MB · stored privately in MinIO'}</small></label>
             <label>MOVEMENT REASON<textarea rows={4} placeholder="State the source, beneficiary, and business reason" value={fundingForm.comment} onChange={(event) => setFundingForm({ ...fundingForm, comment: event.target.value })} /></label>
             <button className="command-button" disabled={fundingSubmitting || !fundingForm.currency || !fundingFile} onClick={() => void submitFunding()}>{fundingSubmitting ? <LoaderCircle className="spin" /> : <ShieldCheck />} UPLOAD & SUBMIT FOR APPROVAL</button>
@@ -1834,7 +2016,9 @@ function ReferenceDataExperience({
   profile: AdminProfile;
   onOpenAml: () => void;
 }) {
-  const [tab, setTab] = useState<'reference' | 'security'>('reference');
+  const [tab, setTab] = useState<'reference' | 'security' | 'assistant'>('reference');
+  const canConfigureAssistant = profile.roles?.includes('super_admin')
+    || profile.permissions?.includes('assistant.configure');
   const request: ReferenceDataRequest = useCallback(
     async <T,>(route: string, init?: { method?: string; body?: unknown }): Promise<T> =>
       adminRequest<T>(route, token, init),
@@ -1845,12 +2029,133 @@ function ReferenceDataExperience({
       <div className="configuration-section-tabs">
         <button className={tab === 'reference' ? 'active' : ''} onClick={() => setTab('reference')}><Database /> REFERENCE DATA</button>
         <button className={tab === 'security' ? 'active' : ''} onClick={() => setTab('security')}><ShieldCheck /> SECURITY & MFA</button>
+        {canConfigureAssistant && <button className={tab === 'assistant' ? 'active' : ''} onClick={() => setTab('assistant')}><Sparkles /> MR. FINIFY</button>}
       </div>
       {tab === 'reference' ? (
         <ReferenceDataWorkspace request={request} profile={profile} onOpenAml={onOpenAml} />
-      ) : (
+      ) : tab === 'security' ? (
         <SecurityConfiguration token={token} profile={profile} />
+      ) : (
+        <MrFinifyConfiguration token={token} profile={profile} />
       )}
+    </section>
+  );
+}
+
+type MrFinifyConfigurationState = {
+  configured: boolean;
+  model: string;
+  endpoint: string;
+  reasoningEffort: string;
+  responseVerbosity: string;
+  rateLimitPerMinute: number;
+  apiKeySource: 'SECURE_DATABASE' | 'ENVIRONMENT' | 'MISSING';
+  apiKeyWriteOnly: boolean;
+  encryptionKeyConfigured: boolean;
+  updatedAt?: string | null;
+  updatedBy?: string | null;
+  availableModels: MrFinifyModelOption[];
+  pricingBasis: string;
+  pricingCheckedAt: string;
+};
+
+type MrFinifyModelOption = {
+  id: string;
+  label: string;
+  costTier: string;
+  recommendation: string;
+  inputUsdPerMillionTokens: number;
+  outputUsdPerMillionTokens: number;
+};
+
+const DEFAULT_MR_FINIFY_MODELS: MrFinifyModelOption[] = [
+  { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna', costTier: 'LOWEST COST', recommendation: 'Recommended for routine, high-volume administration', inputUsdPerMillionTokens: 0.2, outputUsdPerMillionTokens: 1.2 },
+  { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra', costTier: 'BALANCED', recommendation: 'Balanced intelligence and cost for complex operations', inputUsdPerMillionTokens: 2, outputUsdPerMillionTokens: 12 },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol', costTier: 'PREMIUM', recommendation: 'Highest capability for the most complex analysis', inputUsdPerMillionTokens: 5, outputUsdPerMillionTokens: 30 },
+];
+
+function MrFinifyConfiguration({ token, profile }: { token: string; profile: AdminProfile }) {
+  const canManage = profile.roles?.includes('super_admin')
+    || profile.permissions?.includes('assistant.configure');
+  const [settings, setSettings] = useState<MrFinifyConfigurationState | null>(null);
+  const [form, setForm] = useState({ apiKey: '', model: 'gpt-5.6-sol', rateLimitPerMinute: 20 });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const modelOptions = settings?.availableModels?.length ? settings.availableModels : DEFAULT_MR_FINIFY_MODELS;
+  const selectedModel = modelOptions.find((option) => option.id === form.model) || modelOptions[0];
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const next = await adminRequest<MrFinifyConfigurationState>('/admin/assistant/configuration', token);
+      setSettings(next);
+      setForm((current) => ({
+        ...current,
+        apiKey: '',
+        model: next.model || 'gpt-5.6-sol',
+        rateLimitPerMinute: Number(next.rateLimitPerMinute || 20),
+      }));
+    } catch (requestError) { setError((requestError as Error).message); }
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => { if (canManage) void load(); else setLoading(false); }, [canManage, load]);
+
+  const save = async (removeApiKey = false) => {
+    setSaving(true); setError(''); setMessage('');
+    try {
+      const next = await adminRequest<MrFinifyConfigurationState>('/admin/assistant/configuration', token, {
+        method: 'POST',
+        body: {
+          model: form.model.trim(),
+          rateLimitPerMinute: Number(form.rateLimitPerMinute),
+          ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+          ...(removeApiKey ? { removeApiKey: true } : {}),
+        },
+      });
+      setSettings(next);
+      setForm((current) => ({ ...current, apiKey: '' }));
+      setMessage(removeApiKey
+        ? 'The database API key was removed. Environment fallback remains available if configured.'
+        : 'Mr. Finify configuration saved and activated immediately.');
+    } catch (requestError) { setError((requestError as Error).message); }
+    finally { setSaving(false); }
+  };
+
+  if (!canManage) return <section className="security-config-shell panel"><div className="security-config-denied"><LockKeyhole /><h2>Restricted configuration</h2><p>Mr. Finify configuration requires the Assistant Configuration privilege.</p></div></section>;
+  return (
+    <section className="security-config-shell">
+      <ModuleHeader eyebrow="CONFIGURATION / FINIFY INTELLIGENCE" title="Mr. Finify" copy="Configure the server-side OpenAI connection without exposing credentials to the browser, logs, or assistant conversations." action="Refresh configuration" onAction={() => void load()} />
+      <div className="security-config-status">
+        <div><Sparkles /><span>ASSISTANT STATE</span><strong>{settings?.configured ? 'READY' : 'KEY REQUIRED'}</strong><small>{settings?.configured ? 'Secure OpenAI connection configured' : 'Add a server-side API key below'}</small></div>
+        <div><LockKeyhole /><span>API KEY CUSTODY</span><strong>{settings?.apiKeySource?.replaceAll('_', ' ') || 'CHECKING'}</strong><small>Write-only · value is never returned</small></div>
+        <div><ShieldCheck /><span>ENCRYPTION ROOT</span><strong>{settings?.encryptionKeyConfigured ? 'PROTECTED' : 'MISSING'}</strong><small>Root key remains outside the database and UI</small></div>
+      </div>
+      <div className="security-config-grid">
+        <div className="panel security-config-form">
+          <PanelHead eyebrow="OPENAI CONNECTION" title="Runtime configuration" />
+          {loading ? <div className="table-loading"><LoaderCircle className="spin" /> Loading Mr. Finify configuration…</div> : <div className="security-config-fields">
+            <label><span>OPENAI API KEY</span><input type="password" value={form.apiKey} onChange={(event) => setForm({ ...form, apiKey: event.target.value })} placeholder={settings?.configured ? '••••••••  Leave blank to retain current key' : 'Enter server-side OpenAI API key'} autoComplete="new-password" /><small>The key is encrypted with AES-256-GCM. The existing value cannot be viewed or copied back.</small></label>
+            <label><span>MODEL & COST TIER</span><select value={form.model} onChange={(event) => setForm({ ...form, model: event.target.value })}>{modelOptions.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.costTier}</option>)}</select><small>Only approved models can be selected; arbitrary model identifiers are blocked by the API.</small></label>
+            {selectedModel && <div className="mr-finify-cost-card"><CircleDollarSign /><div><span>{selectedModel.costTier}</span><strong>{selectedModel.label}</strong><p>{selectedModel.recommendation}</p></div><dl><div><dt>INPUT</dt><dd>${selectedModel.inputUsdPerMillionTokens.toFixed(2)}</dd></div><div><dt>OUTPUT</dt><dd>${selectedModel.outputUsdPerMillionTokens.toFixed(2)}</dd></div></dl><small>Per 1M tokens · Standard processing · short context. Actual spend depends on token usage.</small></div>}
+            <label><span>REQUESTS PER USER / MINUTE</span><input type="number" min={1} max={100} value={form.rateLimitPerMinute} onChange={(event) => setForm({ ...form, rateLimitPerMinute: Number(event.target.value) })} /><small>Applies independently to each authenticated administrator.</small></label>
+            {error && <div className="access-error"><AlertTriangle />{error}</div>}
+            {message && <div className="security-config-success"><CheckCircle2 />{message}</div>}
+            <button className="command-button" disabled={saving || !form.model.trim() || form.rateLimitPerMinute < 1 || form.rateLimitPerMinute > 100 || (!settings?.configured && form.apiKey.trim().length < 20)} onClick={() => void save()}>{saving ? <LoaderCircle className="spin" /> : <Sparkles />}{saving ? 'SECURING CONFIGURATION' : 'SAVE & ACTIVATE'}<ArrowRight /></button>
+            {settings?.apiKeySource === 'SECURE_DATABASE' && <button className="outline-command" disabled={saving} onClick={() => { if (window.confirm('Remove the stored Mr. Finify API key?')) void save(true); }}><X /> REMOVE DATABASE KEY</button>}
+          </div>}
+        </div>
+        <aside className="panel security-config-guidance">
+          <PanelHead eyebrow="SECRET CONTROL" title="Protected by design" />
+          <div><LockKeyhole /><strong>Server-side only</strong><p>The API key is decrypted only inside the producer when Mr. Finify makes an OpenAI request. It is never included in browser responses.</p></div>
+          <div><ShieldAlert /><strong>Key replacement</strong><p>Enter a new key and save to rotate it immediately. Leave the field blank when changing only the model or rate limit.</p></div>
+          <div><Activity /><strong>Audited updates</strong><p>Configuration changes record the administrator, time, model, rate limit and key status—never the key itself.</p></div>
+          <div><CircleDollarSign /><strong>Cost-aware selection</strong><p>Luna is the recommended default for routine admin work. Use Terra or Sol only when the task requires greater reasoning capability.</p></div>
+          {settings?.updatedAt && <footer>LAST CONFIGURATION UPDATE · {new Date(settings.updatedAt).toLocaleString()}</footer>}
+        </aside>
+      </div>
     </section>
   );
 }
@@ -1968,6 +2273,8 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
     iban: '',
     swiftBic: '',
     walletCode: '103',
+    documentType: 'UGANDA_NATIONAL_ID',
+    issuingCountry: 'UGA',
   });
   const [walletFormOpen, setWalletFormOpen] = useState(false);
   const [walletForm, setWalletForm] = useState({ currency: '', iban: '', swiftBic: '' });
@@ -2113,13 +2420,15 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
         iban: '',
         swiftBic: '',
         walletCode: String(customerWalletTypes.find((row) => row.walletCode === 103)?.walletCode || customerWalletTypes[0]?.walletCode || 103),
+        documentType: 'UGANDA_NATIONAL_ID',
+        issuingCountry: 'UGA',
       });
       setNotice(result.wallet
         ? 'Customer and default wallet opened successfully.'
         : result.accountOpening?.message || 'Customer profile created. KYC approval is required before wallet opening.');
       await load();
       if (result.profile?.customerId) {
-        setTab('wallets');
+        setTab(result.accountOpening?.status === 'PENDING_KYC' ? 'profile' : 'wallets');
         await loadDetail(result.profile.customerId);
       }
     } catch (requestError) { setError((requestError as Error).message); }
@@ -2190,6 +2499,9 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
       (wallet) => wallet.currency === item && wallet.walletCode === 103,
     ),
   );
+  const selectedWalletType = customerWalletTypes.find(
+    (item) => String(item.walletCode) === customerForm.walletCode,
+  );
 
   return (
     <section className="module-workspace">
@@ -2210,6 +2522,10 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
         <label>LAST NAME<input value={customerForm.lastName} onChange={(event) => setCustomerForm({ ...customerForm, lastName: event.target.value })} /></label>
         <label>EMAIL<input type="email" value={customerForm.email} onChange={(event) => setCustomerForm({ ...customerForm, email: event.target.value })} /></label>
         <label>ADDRESS<input value={customerForm.address} onChange={(event) => setCustomerForm({ ...customerForm, address: event.target.value })} /></label>
+        {selectedWalletType?.kycRequired && <>
+          <label>KYC DOCUMENT TYPE<select value={customerForm.documentType} onChange={(event) => setCustomerForm({ ...customerForm, documentType: event.target.value })}><option value="UGANDA_NATIONAL_ID">Uganda national ID</option><option value="PASSPORT">Passport</option></select><small>A linked draft KYC case is created automatically.</small></label>
+          <label>ISSUING COUNTRY<input maxLength={3} value={customerForm.issuingCountry} onChange={(event) => setCustomerForm({ ...customerForm, issuingCountry: event.target.value.toUpperCase().replace(/[^A-Z]/g, '') })} placeholder="UGA" /></label>
+        </>}
         <label>IBAN (OPTIONAL)<input autoCapitalize="characters" placeholder="GB82 WEST 1234 5698 7654 32" value={customerForm.iban} onChange={(event) => setCustomerForm({ ...customerForm, iban: event.target.value.toUpperCase() })} /></label>
         <label>SWIFT / BIC (OPTIONAL)<input autoCapitalize="characters" placeholder="DEUTDEFF500" value={customerForm.swiftBic} onChange={(event) => setCustomerForm({ ...customerForm, swiftBic: event.target.value.toUpperCase() })} /></label>
         <button className="command-button" disabled={!customerForm.msisdn || !customerForm.firstName.trim() || !customerForm.defaultCurrency || !customerForm.walletCode} onClick={() => void createCustomer()}><Check /> START CUSTOMER ACCOUNT OPENING</button>
@@ -2223,7 +2539,7 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
             {!loading && customers.map((customer) => (
               <tr key={customer.customerId} onClick={() => openCustomer(customer)} className="clickable-row">
                 <td><div className="primary-cell"><strong>{customer.name || 'Unnamed customer'}</strong><small>{customer.customerId} · {customer.email || 'No email'}</small></div></td>
-                <td><span className="table-code">{customer.category || 'UNCLASSIFIED'}</span><small className="sub-value">KYC {String(customer.kycStatus ?? '—')}</small></td>
+                <td><span className="table-code">{customer.category || 'UNCLASSIFIED'}</span><small className="sub-value">KYC {kycStatusLabel(customer.kycStatus)}{customer.kycRequired && !customer.kycDataConnected ? ' · DATA REQUIRED' : ''}</small></td>
                 <td className="numeric">{customer.creditScore ?? '—'}</td>
                 <td className="numeric">{formatMoney(customer.creditLimit || 0, 'UGX')}<small className="sub-value">Available {formatMoney(customer.availableLimit || 0, 'UGX')}</small></td>
                 <td>{customer.walletCount}<small className="sub-value">{formatWalletBalances(customer.walletBalances)}</small></td>
@@ -2268,7 +2584,7 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
                 <DataPoint label="CURRENT DPD" value={String(detail.profile.currentDpd ?? 0)} />
                 <DataPoint label="CREDIT LIMIT" value={formatMoney(detail.profile.creditLimit || 0, 'UGX')} />
                 <DataPoint label="AVAILABLE LIMIT" value={formatMoney(detail.profile.availableLimit || 0, 'UGX')} />
-                <DataPoint label="KYC STATUS" value={String(detail.profile.kycStatus ?? '—')} />
+                <DataPoint label="KYC STATUS" value={kycStatusLabel(detail.profile.kycStatus)} />
                 <DataPoint label="ADDRESS" value={detail.profile.address || 'Not provided'} />
               </div>
             )}
@@ -2280,8 +2596,17 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
                     <DataPoint label="LAST NAME" value={detail.profile.lastName || '—'} />
                     <DataPoint label="EMAIL" value={detail.profile.email || '—'} />
                     <DataPoint label="ADDRESS" value={detail.profile.address || '—'} />
-                    <DataPoint label="KYC STATUS" value={String(detail.profile.kycStatus ?? '—')} />
+                    <DataPoint label="KYC STATUS" value={kycStatusLabel(detail.profile.kycStatus)} />
                     <DataPoint label="LATEST KYC CASE" value={detail.latestKycCase?.status || 'NOT STARTED'} />
+                    <DataPoint label="ID TYPE" value={detail.profile.idType?.replaceAll('_', ' ') || '—'} />
+                    <DataPoint label="ID NUMBER" value={detail.profile.idNumber || '—'} />
+                    <DataPoint label="DATE OF BIRTH" value={detail.profile.dob ? formatDate(detail.profile.dob) : '—'} />
+                    <DataPoint label="GENDER" value={detail.profile.gender || '—'} />
+                    <DataPoint label="VERIFIED CASE" value={detail.profile.kycCaseId || '—'} />
+                    <DataPoint label="VERIFIED AT" value={detail.profile.kycVerifiedAt ? formatDate(detail.profile.kycVerifiedAt) : '—'} />
+                    <DataPoint label="VERIFIED BY" value={detail.profile.kycVerifiedBy || '—'} />
+                    <DataPoint label="KYC REQUIREMENT" value={detail.profile.kycRequired ? 'REQUIRED' : 'NOT REQUIRED'} />
+                    <DataPoint label="KYC DATA LINK" value={detail.profile.kycDataConnected ? 'CONNECTED' : detail.profile.kycRequired ? 'REMEDIATION REQUIRED' : 'NOT APPLICABLE'} />
                     <DataPoint label="ACCOUNT OPENING" value={detail.accountOpening?.status || (detail.wallets.length ? 'OPENED' : 'NOT STARTED')} />
                     <DataPoint label="REQUESTED WALLET" value={detail.accountOpening ? `${detail.accountOpening.walletName || detail.accountOpening.walletCode} · ${detail.accountOpening.currency}` : '—'} />
                     <DataPoint label="PROFILE STATUS" value={customerStatus(detail.profile.status)} />
@@ -2303,6 +2628,28 @@ function CustomerWorkspace({ token, onExpired }: { token: string; onExpired: () 
                   {detail.accountOpening && detail.accountOpening.status !== 'OPENED' && (
                     <button className="command-button" onClick={() => void completeAccountOpening()}><ShieldCheck /> CHECK KYC & OPEN WALLET</button>
                   )}
+                </div>
+                <div className="customer-kyc-heading"><div><span>KYC HISTORY</span><strong>Customer-linked identity cases</strong></div><small>{detail.kycCases.length} CASE{detail.kycCases.length === 1 ? '' : 'S'} · LINKED BY MSISDN</small></div>
+                {detail.latestKycCase?.extractedData && <div className="drawer-grid customer-kyc-extracted">
+                  <DataPoint label="EXTRACTED NAME" value={String(detail.latestKycCase.extractedData.fullName || [detail.latestKycCase.extractedData.firstName, detail.latestKycCase.extractedData.lastName].filter(Boolean).join(' ') || '—')} />
+                  <DataPoint label="EXTRACTED ID" value={String(detail.latestKycCase.extractedData.idNumber || '—')} />
+                  <DataPoint label="EXTRACTED DOB" value={String(detail.latestKycCase.extractedData.dateOfBirth || '—')} />
+                  <DataPoint label="SCREENING" value={String(detail.latestKycCase.screeningSummary?.status || 'NOT RUN')} />
+                </div>}
+                <div className="customer-360-table">
+                  <table>
+                    <thead><tr><th>CASE / DOCUMENT</th><th>STATUS</th><th>BIOMETRIC / AML</th><th>EVIDENCE</th><th>REVIEW</th></tr></thead>
+                    <tbody>
+                      {!detail.kycCases.length && <EmptyRow columns={5} message="No KYC case is linked to this customer." />}
+                      {detail.kycCases.map((kycCase) => <tr key={kycCase.id}>
+                        <td><div className="primary-cell"><strong>{kycCase.id}</strong><small>{kycCase.documentType?.replaceAll('_', ' ') || '—'} · {kycCase.issuingCountry || '—'}</small></div></td>
+                        <td><StatusPill value={kycCase.status} /><small className="sub-value">{kycCase.systemRecommendation || 'NO SYSTEM DECISION'}</small></td>
+                        <td><div className="primary-cell"><strong>{kycCase.faceMatchScore === null || kycCase.faceMatchScore === undefined ? 'PENDING' : `${Number(kycCase.faceMatchScore).toFixed(1)}% FACE`}</strong><small>AML {kycCase.amlMatch ? 'MATCH' : 'CLEAR / NONE'}</small></div></td>
+                        <td>{kycCase.documentCount || 0}<small className="sub-value">{kycCase.documentRoles?.join(' · ') || 'NO DOCUMENTS'}</small></td>
+                        <td><div className="primary-cell"><strong>{kycCase.reviewedBy || 'PENDING'}</strong><small>{kycCase.reviewedAt ? formatDate(kycCase.reviewedAt) : formatDate(kycCase.createdAt)}</small></div></td>
+                      </tr>)}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}
@@ -2933,6 +3280,10 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
     totalPages: number;
   };
   const [runs, setRuns] = useState<Array<Record<string, unknown>>>([]);
+  const [eodSchedule, setEodSchedule] = useState<Record<string, unknown> | null>(null);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleRunning, setScheduleRunning] = useState(false);
+  const [scheduleForm, setScheduleForm] = useState({ enabled: true, businessTimezone: 'Europe/London', closureTime: '00:05:00' });
   const [view, setView] = useState<AccountingView>('control');
   const [message, setMessage] = useState('');
   const [businessDate, setBusinessDate] = useState('');
@@ -2960,11 +3311,45 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
   });
   const loadControl = useCallback(async () => {
     try {
-      const result = await adminRequest<Array<Record<string, unknown>>>('/admin/operations/accounting/v1/accounting/eod/runs?limit=100', token);
+      const [result, schedule] = await Promise.all([
+        adminRequest<Array<Record<string, unknown>>>('/admin/operations/accounting/v1/accounting/eod/runs?limit=100', token),
+        adminRequest<Record<string, unknown>>('/admin/operations/accounting/v1/accounting/eod/schedule?reportingEntity=FINIFY_UK', token),
+      ]);
       setRuns(Array.isArray(result) ? result : []);
+      setEodSchedule(schedule);
+      setScheduleForm({
+        enabled: schedule.enabled !== false,
+        businessTimezone: String(schedule.businessTimezone || 'Europe/London'),
+        closureTime: String(schedule.closureTime || '00:05:00').slice(0, 8),
+      });
       setMessage('');
     } catch (requestError) { setMessage((requestError as Error).message); }
   }, [token]);
+  const saveSchedule = async () => {
+    setScheduleSaving(true);
+    try {
+      const schedule = await adminRequest<Record<string, unknown>>(
+        '/admin/operations/accounting/v1/accounting/eod/schedule', token,
+        { method: 'PATCH', body: { ...scheduleForm, reportingEntity: 'FINIFY_UK', updatedBy: profile.username || 'finify-command' } },
+      );
+      setEodSchedule(schedule);
+      setMessage(`Daily EOD schedule saved for ${scheduleForm.closureTime} ${scheduleForm.businessTimezone}.`);
+    } catch (requestError) { setMessage((requestError as Error).message); }
+    finally { setScheduleSaving(false); }
+  };
+  const runSchedulerNow = async () => {
+    if (!window.confirm('Run the automatic EOD catch-up now? Every due currency date that passes controls will be closed.')) return;
+    setScheduleRunning(true);
+    try {
+      const result = await adminRequest<Record<string, unknown>>(
+        '/admin/operations/accounting/v1/accounting/eod/schedule/run-now', token,
+        { method: 'POST', body: { reportingEntity: 'FINIFY_UK' } },
+      );
+      setMessage(`EOD scheduler: ${String(result.message || result.status)}.`);
+      await Promise.all([loadControl(), loadCurrencies()]);
+    } catch (requestError) { setMessage((requestError as Error).message); }
+    finally { setScheduleRunning(false); }
+  };
   useEffect(() => {
     const timer = window.setTimeout(() => void loadControl(), 0);
     return () => window.clearTimeout(timer);
@@ -3122,6 +3507,11 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
     return () => window.clearTimeout(timer);
   }, [businessDate, dateFrom, loadReport, page, view]);
   const changeView = (next: AccountingView) => {
+    if ((next === 'balance-sheet' || next === 'profit-loss') && eodSchedule?.lastBusinessDate) {
+      const lastClosed = String(eodSchedule.lastBusinessDate).slice(0, 10);
+      setBusinessDate(lastClosed);
+      setDateFrom(`${lastClosed.slice(0, 8)}01`);
+    }
     setView(next); setPage(1); setPagedReport(null); setReport(null); setSelectedJournal(null); setBatchResult(null); setCurrencyFormOpen(false); setMessage('');
   };
   const openJournal = async (id: unknown) => {
@@ -3163,8 +3553,8 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
       {message && <OperationNotice tone={/completed/i.test(message) ? 'success' : 'error'} message={message} />}
       <div className="module-metrics">
         <MiniMetric label={view === 'control' ? 'EOD RUNS' : view === 'currencies' ? 'ACTIVE CURRENCIES' : 'REPORT ROWS'} value={view === 'control' ? String(runs.length) : view === 'currencies' ? String(configuredCurrencyCount) : String(pagedReport?.totalRecords ?? reportAccounts.length)} />
-        <MiniMetric label={view === 'control' ? 'COMPLETED' : view === 'currencies' ? 'UNCONFIGURED' : 'CURRENCY SCOPE'} value={view === 'control' ? String(runs.filter((row) => row.status === 'COMPLETED').length) : view === 'currencies' ? String(currencyRows.length - configuredCurrencyCount) : currency === 'ALL' ? `ALL ${configuredCurrencyCount}` : currency} />
-        <MiniMetric label="CONTROL MODE" value={view === 'currencies' ? 'CLOSE ALL' : 'DOUBLE ENTRY'} />
+        <MiniMetric label={view === 'control' ? 'CLOSED RUNS' : view === 'currencies' ? 'UNCONFIGURED' : 'CURRENCY SCOPE'} value={view === 'control' ? String(runs.filter((row) => row.status === 'CLOSED').length) : view === 'currencies' ? String(currencyRows.length - configuredCurrencyCount) : currency === 'ALL' ? `ALL ${configuredCurrencyCount}` : currency} />
+        <MiniMetric label={view === 'control' ? 'AUTO EOD' : 'CONTROL MODE'} value={view === 'control' ? eodSchedule?.enabled ? 'ACTIVE' : 'PAUSED' : view === 'currencies' ? 'CLOSE ALL' : 'DOUBLE ENTRY'} />
       </div>
       <div className="accounting-view-tabs" role="tablist" aria-label="Accounting workspace">
         {([
@@ -3179,8 +3569,8 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
         ))}
       </div>
       <div className="workspace-toolbar accounting-toolbar">
-        {view !== 'balance-sheet' && view !== 'currencies' && <label>DATE FROM<input type="date" value={dateFrom} onChange={(event) => { setDateFrom(event.target.value); setPage(1); }} /></label>}
-        <label>{view === 'balance-sheet' ? 'AS OF DATE' : view === 'currencies' ? 'BUSINESS DATE' : 'DATE TO'}<input type="date" value={businessDate} onChange={(event) => { setBusinessDate(event.target.value); setPage(1); }} /></label>
+        {view !== 'balance-sheet' && view !== 'currencies' && <div className="accounting-date-field"><span>DATE FROM</span><ThemedDatePicker value={dateFrom} onChange={(value) => { setDateFrom(value); setPage(1); }} placeholder="Select start date" contextLabel="REPORT START DATE" /></div>}
+        <div className="accounting-date-field"><span>{view === 'balance-sheet' ? 'AS OF DATE' : view === 'currencies' ? 'BUSINESS DATE' : 'DATE TO'}</span><ThemedDatePicker value={businessDate} onChange={(value) => { setBusinessDate(value); setPage(1); }} placeholder="Select business date" contextLabel={view === 'balance-sheet' ? 'BALANCE SHEET DATE' : view === 'currencies' ? 'EOD BUSINESS DATE' : 'REPORT END DATE'} /></div>
         {view !== 'currencies' && <label>CURRENCY<select value={currency} onChange={(event) => { setCurrency(event.target.value); setPage(1); setSelectedJournal(null); }}>
           <option value="ALL">ALL CURRENCIES</option>
           {currencyRows.filter((row) => row.configured).map((row) => <option key={String(row.currency)} value={String(row.currency)}>{String(row.currency)}</option>)}
@@ -3190,13 +3580,29 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
         {view === 'currencies' && <div className="row-actions"><button disabled={loading} onClick={() => setCurrencyFormOpen((open) => !open)}>ADD NEW CURRENCY</button><button disabled={loading} onClick={() => void runCurrencyBatch(true)}>VALIDATE ALL</button><button disabled={loading} className="danger-action" onClick={() => void runCurrencyBatch(false)}>CLOSE ALL CURRENCIES</button></div>}
         {view !== 'control' && view !== 'currencies' && <div className="row-actions"><button onClick={() => { setPage(1); void loadReport(view, 1); }}>REFRESH REPORT</button></div>}
       </div>
-      {view === 'control' && <div className="panel operational-table">
+      {view === 'control' && <>
+        <div className="panel eod-schedule-panel">
+          <div className="eod-schedule-head"><PanelHead eyebrow="AUTOMATIC BUSINESS CLOSE" title="Daily EOD schedule" /><span className={`eod-schedule-state ${eodSchedule?.enabled ? 'active' : ''}`}><i />{eodSchedule?.enabled ? 'AUTOMATIC CLOSE ACTIVE' : 'SCHEDULE PAUSED'}</span></div>
+          <div className="eod-schedule-status">
+            <div><span>NEXT CLOSE</span><strong>{String(eodSchedule?.nextClosureLocal || 'Loading…')}</strong><small>Closes business date {String(eodSchedule?.closesBusinessDate || '—')}</small></div>
+            <div><span>LAST SCHEDULER RESULT</span><strong>{String(eodSchedule?.lastStatus || 'NOT RUN')}</strong><small>{String(eodSchedule?.lastMessage || 'No scheduled result recorded')}</small></div>
+            <div><span>CURRENCY COVERAGE</span><strong>{String(eodSchedule?.closedCurrencyCount ?? 0)} / {String(eodSchedule?.currencyCount ?? configuredCurrencyCount)}</strong><small>Currencies closed through the due business date</small></div>
+          </div>
+          <div className="eod-schedule-form">
+            <label className="security-switch"><div><strong>Automatic daily EOD</strong><span>Poll continuously and catch up missed business dates after downtime.</span></div><input type="checkbox" checked={scheduleForm.enabled} onChange={(event) => setScheduleForm({ ...scheduleForm, enabled: event.target.checked })} /><i /></label>
+            <label>BUSINESS TIMEZONE<input value={scheduleForm.businessTimezone} onChange={(event) => setScheduleForm({ ...scheduleForm, businessTimezone: event.target.value })} placeholder="Europe/London" /></label>
+            <label>DAILY CLOSURE TIME<input type="time" step="1" value={scheduleForm.closureTime} onChange={(event) => setScheduleForm({ ...scheduleForm, closureTime: event.target.value })} /><small>The preceding business date becomes due at this local time.</small></label>
+            <div className="row-actions"><button disabled={scheduleRunning || scheduleSaving} onClick={() => void runSchedulerNow()}>{scheduleRunning ? 'RUNNING…' : 'RUN DUE CLOSE NOW'}</button><button className="command-button" disabled={scheduleSaving || !scheduleForm.businessTimezone || !scheduleForm.closureTime} onClick={() => void saveSchedule()}>{scheduleSaving ? <LoaderCircle className="spin" /> : <Check />}{scheduleSaving ? 'SAVING…' : 'SAVE SCHEDULE'}</button></div>
+          </div>
+        </div>
+        <div className="panel operational-table">
         <PanelHead eyebrow="PERIOD CLOSE" title="End-of-day control runs" />
         <table><thead><tr><th>RUN</th><th>BUSINESS DATE</th><th>CURRENCY</th><th>MODE</th><th>VARIANCE</th><th>STATUS</th></tr></thead><tbody>
           {!runs.length && <EmptyRow columns={6} message="No EOD runs are available." />}
           {runs.map((row, index) => <tr key={String(row.id ?? row.runId ?? index)}><td><span className="table-code">{String(row.id ?? row.runId ?? '—')}</span></td><td>{String(row.businessDate ?? row.business_date ?? '—')}</td><td>{String(row.currency ?? '—')}</td><td>{row.dryRun || row.dry_run ? 'DRY RUN' : 'CLOSE'}</td><td className="numeric">{String(row.safeguardingVariance ?? row.safeguarding_variance ?? '—')}</td><td><StatusPill value={String(row.status ?? 'UNKNOWN')} /></td></tr>)}
         </tbody></table>
-      </div>}
+        </div>
+      </>}
       {view === 'currencies' && <>
         {currencyFormOpen && <div className="panel currency-provision-panel">
           <div className="currency-provision-head"><PanelHead eyebrow="ATOMIC PROVISIONING" title="Add a new operating currency" /><button className="drawer-close" onClick={() => setCurrencyFormOpen(false)} aria-label="Close currency form"><X /></button></div>
@@ -3509,9 +3915,9 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
   const downloadEvidence = async (request: ApprovalQueueItem) => {
     if (!request.evidenceDocumentId) return;
     try {
-      const response = await fetch(
+      const response = await sessionFetch(
         `${API_URL}/admin/operations/treasury-documents/${request.evidenceDocumentId}/download`,
-        { headers: { authorization: `Bearer ${token}` }, cache: 'no-store' },
+        { cache: 'no-store' },
       );
       if (!response.ok) {
         const raw = await response.json().catch(() => ({}));
@@ -3920,6 +4326,10 @@ function maskIdentifier(value?: string) {
 
 function customerStatus(value: number) {
   return ({ 0: 'ACTIVE', 1: 'SUSPENDED', 2: 'BLOCKED', 6: 'CLOSED' } as Record<number, string>)[Number(value)] || 'RESTRICTED';
+}
+
+function kycStatusLabel(value?: number) {
+  return ({ 0: 'PENDING', 1: 'VERIFIED', 2: 'REJECTED' } as Record<number, string>)[Number(value)] || 'NOT STARTED';
 }
 
 function walletStatus(value: number) {

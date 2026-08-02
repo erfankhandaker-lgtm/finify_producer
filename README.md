@@ -2,21 +2,20 @@
 
 ## Local Docker stack
 
-The repository runs the producer, transaction consumer, accounting API, and
-credit-rule decision service in `compose.yaml`. The services use the existing
-PostgreSQL settings from the root `.env` file. Redis is used only by the
-producer.
+The repository runs Kong Gateway, the two Next.js interfaces, the producer,
+transaction consumer, accounting, credit-rule, KYC and supporting services.
+Kong is the only published API entry point; internal service APIs remain on the
+private Compose network.
 
 ```bash
-docker compose up --build
+docker compose -f compose.yaml -f compose.local.yaml up -d --build
+npm run test:gateway
 ```
 
-The producer API is available at `http://localhost:5002/finify`. The root `.env` must provide the database, Redis, and Kafka variables used by the producer. The consumer supports the same encrypted credential format when `IS_CRD_PLAIN=false`.
-
-The dedicated credit-rule service is available at `http://localhost:5005`.
-Apply migration `014_credit_rule_engine.sql` before starting it. Its Swagger UI
-is at `/docs`, and its complete setup and rule examples are documented in
-`credit-rule-service/README.md`.
+The public API is available through Kong at `http://localhost:8080`. The Admin
+UI is at `http://localhost:3100` and the customer portal is at
+`http://localhost:3200`. See `docs/api-gateway.md` for the route allowlist,
+development/production behavior and deployment requirements.
 
 Migration `015_credit_scored_customers.sql` adds the wide, column-addressable
 customer scoring profile used by dynamic PostgreSQL credit rules.

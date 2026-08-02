@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { BalanceCheckDto, CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { KeywordService } from './keyword.service';
@@ -48,10 +48,17 @@ export class TransactionService {
   remove(id: number) {
     return `This action removes a #${id} transaction`;
   }
-  async balanceCheck(balanceCheckDto: BalanceCheckDto) {
+  async balanceCheck(balanceCheckDto: BalanceCheckDto, identity: string) {
+    if (!balanceCheckDto.accountId) throw new ForbiddenException('An owned wallet identifier is required');
+    await this.transactionRequestService.assertWalletOwned(identity, balanceCheckDto.accountId);
     return this.walletDetailRepository.findOne({ where: { walletMsisdn: balanceCheckDto.accountId } });
   }
-  async transactionprocess(createTransactionDto: CreateTransactionDto) {
+  async transactionprocess(createTransactionDto: CreateTransactionDto, identity: string) {
+    if (createTransactionDto.mobileNumber !== identity) {
+      throw new ForbiddenException('Transaction identity does not match the authenticated account');
+    }
+    await this.transactionRequestService.assertWalletOwned(identity, createTransactionDto.sourceAccount);
+    createTransactionDto = { ...createTransactionDto, mobileNumber: identity };
     // Create a transaction request on SW_TBL_TRANSACTION_REQUEST
     const transactionRequest = await this.transactionRequestService.create(createTransactionDto);
     const keyworddto = {keyword:createTransactionDto.keyword, sourceaccount:createTransactionDto.sourceAccount, destinationaccount:createTransactionDto.destinationAccount, amount:createTransactionDto.amount} ;
@@ -70,7 +77,6 @@ export class TransactionService {
       }
     if(amlResult.code === 100){
       winstonLog.log('info', 'AML Check passed for transaction');
-      winstonLog.log('info', 'Keyword response: %s', JSON.stringify(keywordResponse.SourceDetails));
       const [userDetails, destinationuser] = await Promise.all([
         this.swViewAllUserRepository.findOne({ where: { MSISDN: createTransactionDto.sourceAccount } }),
         this.swViewAllUserRepository.findOne({ where: { MSISDN: createTransactionDto.destinationAccount } }),
@@ -83,7 +89,6 @@ export class TransactionService {
         await this.markTransactionFailed(transactionRequest.transectionId);
         return { Responsecode: 404, ResponseDescription: 'Destination user not found' };
       }
-      winstonLog.log('info', 'User details: %s', JSON.stringify(userDetails));
       const passwordVerificationResult = await this.passwordService.PINVerify(createTransactionDto.pin, createTransactionDto.mobileNumber);
       if (!passwordVerificationResult.Passwordmatch) {
         await this.markTransactionFailed(transactionRequest.transectionId);
@@ -283,10 +288,10 @@ export class TransactionService {
     });
   }
 
-  async getTransactionRequest(transactionId: string) {
-    return await this.transactionRequestService.findOne(transactionId);
+  async getTransactionRequest(transactionId: string, identity: string) {
+    return await this.transactionRequestService.findOneForOwner(transactionId, identity);
   }
-  async findAllPaginated(paginationDto: PaginationDto): Promise<PaginationResponse<SwTblTransactionEntry>> {
-  return this.transactionRequestService.findAllPaginated(paginationDto);
+  async findAllPaginated(paginationDto: PaginationDto, identity: string): Promise<PaginationResponse<SwTblTransactionEntry>> {
+  return this.transactionRequestService.findAllPaginatedForOwner(paginationDto, identity);
 }
 }

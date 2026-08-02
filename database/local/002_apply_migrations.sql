@@ -1,5 +1,20 @@
 \set ON_ERROR_STOP on
 
+DO $$
+BEGIN
+  IF to_regclass('public.finify_schema_migrations') IS NOT NULL THEN
+    RAISE EXCEPTION 'Migration ledger already exists. Use npm run migrate; historical migrations will not be replayed.';
+  END IF;
+END $$;
+
+CREATE TABLE public.finify_schema_migrations (
+  version varchar(3) PRIMARY KEY,
+  name text NOT NULL UNIQUE,
+  checksum_sha256 char(64) NULL,
+  applied_at timestamp without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  applied_by text NOT NULL DEFAULT CURRENT_USER
+);
+
 \echo Applying 001_admin_auth.sql
 \ir /migrations/001_admin_auth.sql
 \echo Applying 002_charge_relations.sql
@@ -80,3 +95,35 @@
 \ir /migrations/039_admin_security_configuration.sql
 \echo Applying 040_eod_business_close_schedule.sql
 \ir /migrations/040_eod_business_close_schedule.sql
+\echo Applying 041_mr_finify_assistant.sql
+\ir /migrations/041_mr_finify_assistant.sql
+\echo Applying 042_mr_finify_secure_configuration.sql
+\ir /migrations/042_mr_finify_secure_configuration.sql
+\echo Applying 043_customer_kyc_profile_sync.sql
+\ir /migrations/043_customer_kyc_profile_sync.sql
+
+INSERT INTO public.finify_schema_migrations(version,name)
+SELECT lpad(version::text,3,'0'),
+       (ARRAY[
+         '001_admin_auth.sql','002_charge_relations.sql','003_reconcile_charge_configuration.sql',
+         '004_charge_performance_indexes.sql','005_reset_commission_configuration.sql',
+         '006_finify_transaction_posting.sql','007_consumer_merchant_orchestration.sql',
+         '008_configurable_merchant_integrations.sql','009_reference_data_maker_checker.sql',
+         '010_aml_configuration_maker_checker.sql','011_aml_transaction_lifecycle.sql',
+         '012_eod_accounting.sql','013_wallet_operations.sql','014_credit_rule_engine.sql',
+         '015_credit_scored_customers.sql','016_admin_operations.sql','017_pricing_rule_flows.sql',
+         '018_scored_customer_profile_link.sql','019_treasury_funding.sql',
+         '020_bank_treasury_movements.sql','021_treasury_documents.sql',
+         '022_customer_registry_scale.sql','023_admin_transaction_registry.sql',
+         '024_merchant_refunds.sql','025_accounting_reporting_controls.sql',
+         '026_multicurrency_accounting.sql','027_multicurrency_treasury_wallets.sql',
+         '028_treasury_balance_integrity.sql','029_treasury_accounting.sql',
+         '030_customer_wallet_routing.sql','031_kyc_schema.sql','032_kyc_sanctions_screening.sql',
+         '033_kyc_sanctions_sync.sql','034_kyc_account_opening_enforcement.sql',
+         '035_customer_main_wallet_kyc.sql','036_business_portal_identity.sql',
+         '037_admin_biometric_login.sql','038_admin_totp_mfa.sql',
+         '039_admin_security_configuration.sql','040_eod_business_close_schedule.sql',
+         '041_mr_finify_assistant.sql','042_mr_finify_secure_configuration.sql',
+         '043_customer_kyc_profile_sync.sql'
+       ])[version]
+FROM generate_series(1,43) AS version;

@@ -63,6 +63,8 @@ services:
       kafka: { condition: service_healthy }
       minio: { condition: service_healthy }
     environment: &local-service-environment
+      NODE_MODE: ${NODE_MODE:-development}
+      NODE_ENV: ${NODE_MODE:-development}
       IS_CRD_PLAIN: "true"
       DB_DIALECT: postgres
       DB_HOST: postgres
@@ -90,7 +92,13 @@ services:
       MINIO_TREASURY_BUCKET: finify-treasury-documents
       MINIO_KYC_BUCKET: finify-kyc-documents
       KYC_ADMIN_API_KEY: finify-local-kyc-key-change-me
+      ACCOUNTING_ADMIN_API_KEY: finify-local-accounting-key-change-me
+      INTEGRATION_ADMIN_API_KEY: finify-local-integration-key-change-me
+      CREDIT_RULE_ADMIN_API_KEY: finify-local-credit-admin-key-change-me
+      CREDIT_RULE_EVALUATION_API_KEY: finify-local-credit-evaluation-key-change-me
+      INTEGRATION_SECRET_KEY: finify-local-development-secret-key-change-me
       ADMIN_MFA_ENCRYPTION_KEY: finify-local-mfa-encryption-key-change-before-production
+      FINIFY_SECRET_ENCRYPTION_KEY: finify-local-secret-encryption-key-change-before-production
       ADMIN_MFA_ISSUER: Finify Local Admin
       TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
 
@@ -103,6 +111,8 @@ services:
     environment:
       MINIO_ROOT_USER: finify_local_minio
       MINIO_ROOT_PASSWORD: finify_local_minio_password_change_me
+    ports:
+      - "${MINIO_CONSOLE_PORT:-9011}:9001"
 
   consumer:
     depends_on:
@@ -114,7 +124,7 @@ services:
       KAFKA_CLIENT_ID: finify-service-consumer
       KAFKA_GROUP_ID: finify-service-consumer-local
       KAFKA_TOPICS: PMNT
-      MERCHANT_CONFIRMATION_PUBLIC_URL: http://consumer:5003/v1/merchant-confirmations
+      MERCHANT_CONFIRMATION_PUBLIC_URL: http://kong:8000/v1/merchant-confirmations
 
   accounting:
     depends_on:

@@ -8,7 +8,9 @@ abstract class ApiKeyGuard implements CanActivate {
 
   canActivate(context: ExecutionContext): boolean {
     const expected = this.config.get<string>(this.configKey);
-    const production = this.config.get<string>('NODE_ENV') === 'production';
+    const production = ['prod', 'production'].includes(String(
+      this.config.get<string>('NODE_MODE') || this.config.get<string>('NODE_ENV') || 'development',
+    ).toLowerCase());
     if (!expected && !production) return true;
     const supplied = context.switchToHttp().getRequest<Request>().header('x-api-key');
     if (!expected || supplied !== expected) {

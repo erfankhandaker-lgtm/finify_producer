@@ -1,4 +1,7 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException, BadGatewayException, ForbiddenException, Injectable,
+  NotFoundException, ServiceUnavailableException, UnauthorizedException,
+} from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PasswordService } from '../transaction/password.service';
 import { TransactionService } from '../transaction/transaction.service';
@@ -43,7 +46,69 @@ export class PortalService {
       groups[wallet.currency] = (groups[wallet.currency] || 0) + Number(wallet.balance || 0);
       return groups;
     }, {});
-    return { principal, wallets, balances, recentActivity: activity, kyc, services };
+    const kycRequired = principal.accountType === 'CUSTOMER'
+      && wallets.some((wallet: any) => Boolean(wallet.kycRequired));
+    const kycComplete = !kycRequired || kyc?.status === 'APPROVED';
+    return { principal, wallets, balances, recentActivity: activity, kyc, kycRequired, kycComplete, services };
+  }
+
+  async kycJourney(identity: string) {
+    const principal = await this.principal(identity);
+    if (principal.accountType !== 'CUSTOMER') {
+      throw new BadRequestException('Business KYC is managed through the business onboarding process');
+    }
+    const [requirement] = await this.db.query(
+      `SELECT EXISTS(
+         SELECT 1 FROM public."SW_TBL_WALLET" wallet
+         JOIN public."SW_TBL_WALLET_TYPE" type ON type."Wallet_ID"=wallet."Wallet_Code"
+         WHERE wallet.owner_type='CUSTOMER' AND wallet.owner_msisdn=$1::bigint
+           AND wallet."Status"<>6 AND type."Is_Kyc_Needed"
+       ) AS required`, [identity],
+    );
+    const [kycCase] = await this.db.query(
+      `SELECT id,status,document_type AS "documentType",issuing_country AS "issuingCountry",
+              system_recommendation AS "systemRecommendation",
+              face_match_score::numeric AS "faceMatchScore",aml_match AS "amlMatch",
+              screening_summary AS "screeningSummary",final_reason AS "finalReason",
+              created_at AS "createdAt",updated_at AS "updatedAt",reviewed_at AS "reviewedAt"
+       FROM kyc.cases WHERE customer_msisdn=$1::bigint
+       ORDER BY CASE WHEN status IN ('DRAFT','RESUBMISSION_REQUIRED','PROCESSING','MANUAL_REVIEW') THEN 0 ELSE 1 END,
+                created_at DESC LIMIT 1`, [identity],
+    );
+    const documents = kycCase ? await this.db.query(
+      `SELECT document_role AS role,original_name AS "originalName",created_at AS "createdAt"
+       FROM kyc.documents WHERE case_id=$1::uuid AND deleted_at IS NULL
+       ORDER BY created_at`, [kycCase.id],
+    ) : [];
+    return {
+      required: Boolean(requirement?.required),
+      complete: !requirement?.required || kycCase?.status === 'APPROVED',
+      case: kycCase ? { ...kycCase, documents } : null,
+    };
+  }
+
+  async uploadKycDocument(identity: string, role: string, file: Express.Multer.File) {
+    const kycCase = await this.ownedEditableKycCase(identity);
+    const allowedRole = kycCase.documentType === 'PASSPORT'
+      ? ['PASSPORT', 'SELFIE']
+      : ['ID_FRONT', 'ID_BACK', 'SELFIE'];
+    const normalizedRole = String(role || '').trim().toUpperCase();
+    if (!allowedRole.includes(normalizedRole)) {
+      throw new BadRequestException('This document role is not valid for the selected identity document');
+    }
+    if (!['image/jpeg', 'image/png'].includes(file.mimetype)) {
+      throw new BadRequestException('KYC evidence must be a JPEG or PNG image');
+    }
+    const form = new FormData();
+    form.set('role', normalizedRole);
+    form.set('file', new Blob([new Uint8Array(file.buffer)], { type: file.mimetype }), file.originalname);
+    return this.callKyc(`/cases/${kycCase.id}/documents`, 'POST', identity, form);
+  }
+
+  async verifyKyc(identity: string) {
+    const kycCase = await this.ownedEditableKycCase(identity);
+    await this.callKyc(`/cases/${kycCase.id}/verify`, 'POST', identity, JSON.stringify({}));
+    return this.kycJourney(identity);
   }
 
   async activity(identity: string, query: PortalActivityQueryDto) {
@@ -86,6 +151,7 @@ export class PortalService {
 
   async payment(identity: string, input: PortalPaymentDto) {
     const principal = await this.principal(identity);
+    await this.assertKycEligible(principal);
     const [source] = await this.db.query(
       `SELECT "Wallet_MSISDN"::text AS "walletId",currency,"Status" AS status
        FROM public."SW_TBL_WALLET"
@@ -107,7 +173,7 @@ export class PortalService {
       referenceId: input.referenceId,
       currency: input.currency,
       transactionId: undefined as any,
-    });
+    }, identity);
   }
 
   async changePin(identity: string, input: ChangePortalPinDto) {
@@ -154,12 +220,71 @@ export class PortalService {
               wallet.commission_balance::numeric AS "commissionBalance",upper(wallet.currency) AS currency,
               wallet."Status" AS status,wallet.is_default AS "isDefault",
               wallet.wallet_purpose AS purpose,wallet.iban,wallet.swift_bic AS "swiftBic"
+              ,CASE WHEN COALESCE(type."Is_Kyc_Needed"::int,0)=1 THEN true ELSE false END AS "kycRequired"
        FROM public."SW_TBL_WALLET" wallet
        LEFT JOIN public."SW_TBL_WALLET_TYPE" type ON type."Wallet_ID"=wallet."Wallet_Code"
        WHERE wallet.owner_msisdn=$1::bigint AND wallet.owner_type=$2 AND wallet."Status"<>6
        ORDER BY wallet.is_default DESC,wallet."Created_Date"`,
       [principal.ownerMsisdn, principal.ownerType],
     );
+  }
+
+  private async assertKycEligible(principal: Principal) {
+    if (principal.accountType !== 'CUSTOMER') return;
+    const [state] = await this.db.query(
+      `SELECT EXISTS(
+         SELECT 1 FROM public."SW_TBL_WALLET" wallet
+         JOIN public."SW_TBL_WALLET_TYPE" type ON type."Wallet_ID"=wallet."Wallet_Code"
+         WHERE wallet.owner_type='CUSTOMER' AND wallet.owner_msisdn=$1::bigint
+           AND wallet."Status"<>6 AND type."Is_Kyc_Needed"
+       ) AS required,
+       EXISTS(
+         SELECT 1 FROM kyc.cases WHERE customer_msisdn=$1::bigint AND status='APPROVED'
+       ) AS approved`, [principal.ownerMsisdn],
+    );
+    if (state?.required && !state?.approved) {
+      throw new ForbiddenException('Complete KYC verification before making a payment');
+    }
+  }
+
+  private async ownedEditableKycCase(identity: string) {
+    await this.principal(identity);
+    const [kycCase] = await this.db.query(
+      `SELECT id,document_type AS "documentType",status
+       FROM kyc.cases WHERE customer_msisdn=$1::bigint
+         AND status IN ('DRAFT','RESUBMISSION_REQUIRED')
+       ORDER BY created_at DESC LIMIT 1`, [identity],
+    );
+    if (!kycCase) throw new ForbiddenException('No editable KYC case belongs to this account');
+    return kycCase;
+  }
+
+  private async callKyc(path: string, method: string, actor: string, body: FormData | string) {
+    const key = process.env.KYC_ADMIN_API_KEY || '';
+    if (!key) throw new ServiceUnavailableException('KYC service credential is not configured');
+    const base = (process.env.KYC_SERVICE_URL || 'http://127.0.0.1:5006').replace(/\/+$/, '');
+    const multipart = body instanceof FormData;
+    let response: Response;
+    try {
+      response = await fetch(`${base}${path}`, {
+        method,
+        headers: {
+          'x-admin-api-key': key,
+          'x-actor-id': `CUSTOMER:${actor}`,
+          ...(multipart ? {} : { 'content-type': 'application/json' }),
+        },
+        body,
+        signal: AbortSignal.timeout(90_000),
+      });
+    } catch {
+      throw new ServiceUnavailableException('KYC verification service is unavailable');
+    }
+    const payload: any = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = Array.isArray(payload?.message) ? payload.message.join(', ') : payload?.message;
+      throw new BadGatewayException(message || 'KYC service could not complete the request');
+    }
+    return payload;
   }
 
   private activityFor(walletIds: string[], limit: number, offset: number) {

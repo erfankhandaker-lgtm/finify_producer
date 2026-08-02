@@ -5,10 +5,12 @@ import * as models from '../../models';
 
 const plain = process.env.IS_CRD_PLAIN === 'true';
 const credential = (value?: string) => plain ? value : decrypt(value);
+const mode = String(process.env.NODE_MODE || process.env.NODE_ENV || 'development').toLowerCase();
 
 const databaseForEnvironment = () => {
-  switch (process.env.NODE_ENV) {
+  switch (mode) {
     case 'test': return credential(process.env.DB_NAME_TEST);
+    case 'prod':
     case 'production': return credential(process.env.DB_NAME_PRODUCTION);
     default: return credential(process.env.DB_NAME_DEVELOPMENT);
   }

@@ -54,7 +54,8 @@ export class EodSchedulerService implements OnModuleInit, OnModuleDestroy {
               period.status AS "latestPeriodStatus",
               to_char(period.business_date,'YYYY-MM-DD') AS "latestPeriodDate",
               period.closed_at AS "lastClosedAt",
-              period.closed_by AS "lastClosedBy"
+              period.closed_by AS "lastClosedBy",
+              to_char(closed.last_closed_date,'YYYY-MM-DD') AS "lastClosedDate"
        FROM public.sw_tbl_accounting_configuration config
        LEFT JOIN LATERAL (
          SELECT row.status,row.business_date,row.closed_at,row.closed_by
@@ -62,20 +63,33 @@ export class EodSchedulerService implements OnModuleInit, OnModuleDestroy {
          WHERE row.reporting_entity=config.reporting_entity AND row.currency=config.currency
          ORDER BY row.business_date DESC LIMIT 1
        ) period ON true
+       LEFT JOIN LATERAL (
+         SELECT max(row.business_date) AS last_closed_date
+         FROM public.sw_tbl_accounting_period row
+         WHERE row.reporting_entity=config.reporting_entity
+           AND row.currency=config.currency AND row.status='CLOSED'
+       ) closed ON true
        WHERE config.reporting_entity=$1 AND config.is_active
          AND config.effective_from<=CURRENT_DATE
          AND (config.effective_to IS NULL OR config.effective_to>=CURRENT_DATE)
        ORDER BY config.currency`,
       [reportingEntity],
     );
+    const latestDueBusinessDate = this.latestDueDate(now, schedule.businessTimezone, schedule.closureTime);
+    const currencyClosure = currencies.map((row: any) => ({
+      ...row,
+      dueBusinessDate: latestDueBusinessDate,
+      closedThroughDueDate: Boolean(row.lastClosedDate && row.lastClosedDate >= latestDueBusinessDate),
+    }));
     return {
       ...schedule,
       nextClosureLocal: this.nextClosureLocal(now, schedule.businessTimezone, schedule.closureTime),
       closesBusinessDate: this.businessDateAtNextClosure(now, schedule.businessTimezone, schedule.closureTime),
+      latestDueBusinessDate,
       scheduleSemantics: 'The configured local time closes the preceding business date.',
-      currencies,
-      currencyCount: currencies.length,
-      closedCurrencyCount: currencies.filter((row: any) => row.latestPeriodStatus === 'CLOSED').length,
+      currencies: currencyClosure,
+      currencyCount: currencyClosure.length,
+      closedCurrencyCount: currencyClosure.filter((row: any) => row.closedThroughDueDate).length,
     };
   }
 
@@ -191,15 +205,20 @@ export class EodSchedulerService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async acquireSchedule(entity: string, force: boolean): Promise<ScheduleRow | null> {
-    const [row] = await this.dataSource.query(
+    await this.dataSource.query(
       `UPDATE public.sw_tbl_eod_schedule SET
          lease_owner=$2,lease_until=CURRENT_TIMESTAMP + INTERVAL '10 minutes',
          last_tick_at=CURRENT_TIMESTAMP,last_status='RUNNING'
        WHERE reporting_entity=$1 AND ($3::boolean OR enabled)
-         AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP OR lease_owner=$2)
-       RETURNING reporting_entity AS "reportingEntity",enabled,
-         business_timezone AS "businessTimezone",closure_time::text AS "closureTime"`,
+         AND (lease_until IS NULL OR lease_until<CURRENT_TIMESTAMP OR lease_owner=$2)`,
       [entity, this.instanceId, force],
+    );
+    const [row] = await this.dataSource.query(
+      `SELECT reporting_entity AS "reportingEntity",enabled,
+              business_timezone AS "businessTimezone",closure_time::text AS "closureTime"
+       FROM public.sw_tbl_eod_schedule
+       WHERE reporting_entity=$1 AND lease_owner=$2 AND lease_until>CURRENT_TIMESTAMP`,
+      [entity, this.instanceId],
     );
     return row || null;
   }

@@ -8,6 +8,8 @@ export class SwTblWallet {
   @Column({ type: 'smallint', name: 'Status', nullable: true }) status: number;
   @Column({ type: 'uuid', name: 'Account_code' }) accountCode: string;
   @Column({ type: 'text', name: 'currency' }) currency: string;
+  @Column({ type: 'bigint', name: 'owner_msisdn' }) ownerMsisdn: string;
+  @Column({ type: 'text', name: 'owner_type' }) ownerType: string;
 }
 
 @Entity({ name: 'SW_TBL_WALLET_TYPE', synchronize: false })

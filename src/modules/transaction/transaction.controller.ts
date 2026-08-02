@@ -1,4 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Req, UseGuards } from '@nestjs/common';
+import { Request } from 'express';
 import { TransactionService } from './transaction.service';
 import { BalanceCheckDto, CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -35,20 +36,20 @@ export class TransactionController {
   //   return this.transactionService.remove(+id);
   // }
   @Post('process')
-  transactionprocess(@Body() createTransactionDto: CreateTransactionDto) {
-    return this.transactionService.transactionprocess(createTransactionDto);
+  transactionprocess(@Body() createTransactionDto: CreateTransactionDto, @Req() request: Request & { user: { username: string } }) {
+    return this.transactionService.transactionprocess(createTransactionDto, request.user.username);
   }
   @Get('request/:id')
-  getTransactionRequest(@Param('id') id: string) {
-    return this.transactionService.getTransactionRequest(id);
+  getTransactionRequest(@Param('id') id: string, @Req() request: Request & { user: { username: string } }) {
+    return this.transactionService.getTransactionRequest(id, request.user.username);
   }
   @Post('balance')
-  balanceCheck(@Body() balanceCheckDto: BalanceCheckDto) {
-    return this.transactionService.balanceCheck(balanceCheckDto);
+  balanceCheck(@Body() balanceCheckDto: BalanceCheckDto, @Req() request: Request & { user: { username: string } }) {
+    return this.transactionService.balanceCheck(balanceCheckDto, request.user.username);
   }
   @Get('transactions')
-  async getTransactions(@Query() paginationDto: PaginationDto) {
+  async getTransactions(@Query() paginationDto: PaginationDto, @Req() request: Request & { user: { username: string } }) {
     // Call the service function to get paginated data
-    return this.transactionService.findAllPaginated(paginationDto);
+    return this.transactionService.findAllPaginated(paginationDto, request.user.username);
   }
 }

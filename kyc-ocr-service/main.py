@@ -1,5 +1,6 @@
 from importlib.util import find_spec
 from io import BytesIO
+from datetime import datetime
 import os
 import re
 from urllib.parse import urlparse
@@ -113,11 +114,34 @@ def extract_fields(text: str, country: str, document_type: str) -> dict:
         elif re.fullmatch(r"(?:GIVEN NAMES?|FIRST NAME)", line, re.IGNORECASE) and index + 1 < len(lines):
             given_names = lines[index + 1]
     full_name = " ".join(value for value in [given_names, surname] if value) or None
+    dob_match = re.search(
+        r"(?:DATE OF BIRTH|BIRTH DATE|DOB)\s*[:\-]?\s*((?:0?[1-9]|[12]\d|3[01])[/.-](?:0?[1-9]|1[0-2])[/.-](?:19|20)\d{2})",
+        normalized,
+        re.IGNORECASE,
+    )
+    date_of_birth = None
+    if dob_match:
+        raw_date = re.sub(r"[.-]", "/", dob_match.group(1))
+        try:
+            date_of_birth = datetime.strptime(raw_date, "%d/%m/%Y").date().isoformat()
+        except ValueError:
+            date_of_birth = None
+    gender_match = re.search(r"(?:SEX|GENDER)\s*[:\-]?\s*(MALE|FEMALE|M|F)\b", normalized, re.IGNORECASE)
+    address_match = re.search(
+        r"(?:ADDRESS|RESIDENCE)\s*[:\-]?\s*(.+?)(?=\s+(?:NATIONALITY|SEX|GENDER|DOB|DATE OF BIRTH|EXPIRY|$))",
+        normalized,
+        re.IGNORECASE,
+    )
     return {
         "documentType": document_type,
         "country": country,
         "idNumber": nin_match.group(0) if nin_match else None,
         "fullName": full_name,
+        "firstName": given_names,
+        "lastName": surname,
+        "dateOfBirth": date_of_birth,
+        "gender": gender_match.group(1).upper() if gender_match else None,
+        "address": address_match.group(1).strip()[:500] if address_match else None,
         "dates": dates[:3],
         "rawText": normalized[:8000],
     }
