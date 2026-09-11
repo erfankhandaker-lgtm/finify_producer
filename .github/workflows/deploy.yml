@@ -27,7 +27,7 @@ jobs:
     timeout-minutes: 20
     environment: ${{ inputs.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.image_tag }}
       - name: Validate deployment configuration
