@@ -6,7 +6,7 @@ import {
   History, Home, Landmark, LoaderCircle, LockKeyhole, LogOut, Menu,
   ReceiptText, RefreshCw, ScanFace, Send, ShieldCheck, Smartphone, UploadCloud, WalletCards, X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { sessionFetch } from '../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
@@ -43,6 +43,13 @@ type KycJourney = {
     screeningSummary?: Record<string, unknown>; finalReason?: string;
     documents: Array<{ role: string; originalName: string; createdAt: string }>;
   } | null;
+};
+
+type PaymentResult = {
+  Responsecode?: number | string;
+  ResponseCode?: number | string;
+  ResponseDescription?: string;
+  TransactionId?: string;
 };
 
 async function api<T>(path: string, token?: string, init?: { method?: string; body?: Record<string, unknown> | FormData }): Promise<T> {
@@ -97,7 +104,11 @@ export default function PortalPage() {
     } finally { setLoading(false); }
   }, [token]);
 
-  useEffect(() => { if (ready && token) void load(token); }, [ready, token, load]);
+  useEffect(() => {
+    if (!ready || !token) return;
+    const pendingLoad = window.setTimeout(() => void load(token), 0);
+    return () => window.clearTimeout(pendingLoad);
+  }, [ready, token, load]);
 
   const logout = () => {
     void api('/auth/logout', token, { method: 'POST' }).finally(() => {
@@ -203,7 +214,7 @@ function PaymentView({ token, data, onDone }: { token: string; data: Dashboard; 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault(); setBusy(true); setMessage(null);
     try {
-      const result: any = await api('/portal/payments', token, { method: 'POST', body: { ...form, amount: Number(form.amount), currency: source?.currency } });
+      const result = await api<PaymentResult>('/portal/payments', token, { method: 'POST', body: { ...form, amount: Number(form.amount), currency: source?.currency } });
       if (Number(result?.Responsecode ?? result?.ResponseCode ?? 200) >= 400) throw new Error(result?.ResponseDescription || 'Payment was not completed');
       setMessage({ tone: 'success', text: `Payment sent successfully${result?.TransactionId ? ` · ${result.TransactionId}` : ''}.` });
       setForm((current) => ({ ...current, destinationWalletId: '', amount: '', referenceId: '', pin: '' })); setRecipient(null); onDone();
@@ -235,7 +246,10 @@ function KycView({ token, data, onRefresh }: { token: string; data: Dashboard; o
     catch (next) { setError((next as Error).message); }
     finally { setBusy(false); }
   }, [token]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const pendingLoad = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(pendingLoad);
+  }, [load]);
   const upload = async (role: string, file?: File) => {
     if (!file) return;
     const form = new FormData(); form.set('role', role); form.set('file', file);

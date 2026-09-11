@@ -1,0 +1,47 @@
+services:
+  producer:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/producer:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NODE_MODE: production
+      NODE_ENV: production
+
+  consumer:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/consumer:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NODE_MODE: production
+      NODE_ENV: production
+
+  accounting:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/accounting:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NODE_MODE: production
+      NODE_ENV: production
+
+  credit-rules:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/credit-rules:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NODE_MODE: production
+      NODE_ENV: production
+
+  kyc:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/kyc:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NODE_MODE: production
+      NODE_ENV: production
+
+  kyc-ocr:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/kyc-ocr:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+
+  admin-ui:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/admin-ui:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NEXT_PUBLIC_SITE_URL: ${ADMIN_SITE_URL:?Set ADMIN_SITE_URL}
+
+  portal-ui:
+    image: ${FINIFY_IMAGE_REGISTRY:?Set FINIFY_IMAGE_REGISTRY}/portal-ui:${FINIFY_IMAGE_TAG:?Set FINIFY_IMAGE_TAG}
+    environment:
+      NEXT_PUBLIC_SITE_URL: ${PORTAL_SITE_URL:?Set PORTAL_SITE_URL}
+
+  # Never start the payment simulator in a production deployment.
+  mock-merchant:
+    profiles: [development-only]

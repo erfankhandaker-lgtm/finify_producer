@@ -10,6 +10,12 @@ const customer = '447700920001';
 const directMerchant = '447700910001';
 const specialMerchant = '447700910002';
 const pin = '1234';
+const integrationAdminApiKey = process.env.INTEGRATION_ADMIN_API_KEY || '';
+const customerCookies = new Map();
+
+function customerCookieHeader() {
+  return [...customerCookies.entries()].map(([name, value]) => `${name}=${value}`).join('; ');
+}
 
 const db = new Client({
   host: process.env.E2E_DB_HOST || '127.0.0.1',
@@ -24,10 +30,26 @@ function assert(condition, message) {
 }
 
 async function request(url, init = {}) {
+  const isProducerRequest = url.startsWith(producerUrl);
+  const headers = { 'content-type': 'application/json', ...(init.headers || {}) };
+  if (isProducerRequest && customerCookies.size) {
+    headers.cookie = customerCookieHeader();
+    const csrf = customerCookies.get('finify_customer_csrf');
+    if (csrf && !['GET', 'HEAD', 'OPTIONS'].includes(String(init.method || 'GET').toUpperCase())) {
+      headers['x-csrf-token'] = decodeURIComponent(csrf);
+    }
+  }
   const response = await fetch(url, {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers || {}) },
+    headers,
   });
+  if (isProducerRequest) {
+    for (const value of response.headers.getSetCookie()) {
+      const [pair] = value.split(';');
+      const separator = pair.indexOf('=');
+      if (separator > 0) customerCookies.set(pair.slice(0, separator), pair.slice(separator + 1));
+    }
+  }
   const text = await response.text();
   let body;
   try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
@@ -59,10 +81,9 @@ async function waitForTransaction(transactionId, expectedStatus, timeoutMs = 200
   throw new Error(`Transaction ${transactionId} did not reach status ${expectedStatus}`);
 }
 
-async function createPayment(token, destinationAccount, referenceId) {
+async function createPayment(destinationAccount, referenceId) {
   const response = await request(`${producerUrl}/transaction/process`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}` },
     body: JSON.stringify({
       amount: 100,
       pin,
@@ -84,6 +105,7 @@ async function main() {
   try {
     const localAuthSecret = process.env.AUTH_MODULE;
     assert(localAuthSecret, 'AUTH_MODULE is required to seed the local E2E PIN');
+    assert(integrationAdminApiKey, 'INTEGRATION_ADMIN_API_KEY is required for private consumer E2E operations');
     const pinHash = crypto.createHmac('sha256', localAuthSecret).update(pin).digest('hex');
     await db.query(
       `UPDATE "SW_TBL_PROFILE_CUST"
@@ -94,6 +116,7 @@ async function main() {
 
     await request(`${consumerUrl}/v1/merchant-integrations/${specialMerchant}`, {
       method: 'PUT',
+      headers: { 'x-admin-api-key': integrationAdminApiKey },
       body: JSON.stringify({
         channel: 'API',
         active: true,
@@ -126,26 +149,29 @@ async function main() {
       method: 'POST',
       body: JSON.stringify({ username: customer, password: pin }),
     });
-    const token = String(login.payload?.token || login.token || '');
-    assert(token, 'Customer login did not return a token');
+    const loginResult = login.payload || login;
+    assert(loginResult.authenticated === true, 'Customer login did not create a secure session');
+    assert(customerCookies.has('finify_customer_access'), 'Customer login did not set the secure access cookie');
+    assert(customerCookies.has('finify_customer_csrf'), 'Customer login did not set the CSRF cookie');
 
-    const directId = await createPayment(token, directMerchant, 'E2E-DIRECT-REFUND');
+    const directId = await createPayment(directMerchant, 'E2E-DIRECT-REFUND');
     const direct = await waitForTransaction(directId, 5);
     assert(Number(direct.fee) > 0, 'Direct payment charge was not applied');
     assert(Number(direct.commission) > 0, 'Direct payment commission was not applied');
 
-    const twoLegApprovedId = await createPayment(token, specialMerchant, 'E2E-LEG2-SUCCESS');
+    const twoLegApprovedId = await createPayment(specialMerchant, 'E2E-LEG2-SUCCESS');
     const approved = await waitForTransaction(twoLegApprovedId, 5);
     assert(Number(approved.fee) > 0, 'Two-leg payment charge was not applied');
     assert(Number(approved.commission) > 0, 'Two-leg payment commission was not applied');
 
-    const twoLegRejectedId = await createPayment(token, specialMerchant, 'E2E-LEG2-REJECT');
+    const twoLegRejectedId = await createPayment(specialMerchant, 'E2E-LEG2-REJECT');
     const rejected = await waitForTransaction(twoLegRejectedId, 6);
     assert(Number(rejected.fee) > 0, 'Rejected two-leg payment did not capture its charge');
     assert(Number(rejected.commission) > 0, 'Rejected two-leg payment did not capture its commission');
 
     const refund = await request(`${consumerUrl}/v1/merchant-refunds`, {
       method: 'POST',
+      headers: { 'x-admin-api-key': integrationAdminApiKey },
       body: JSON.stringify({
         originalTransactionId: directId,
         refundReference: 'REFUND-E2E-DIRECT-001',
@@ -157,6 +183,7 @@ async function main() {
 
     const duplicateRefund = await request(`${consumerUrl}/v1/merchant-refunds`, {
       method: 'POST',
+      headers: { 'x-admin-api-key': integrationAdminApiKey },
       body: JSON.stringify({
         originalTransactionId: directId,
         refundReference: 'REFUND-E2E-DIRECT-001',
@@ -229,6 +256,45 @@ async function main() {
       aml: Object.fromEntries(amlStates),
     }, null, 2));
   } finally {
+    await db.query('BEGIN');
+    try {
+      await db.query(
+        `DELETE FROM kyc.cases
+         WHERE customer_msisdn=$1::bigint
+           AND idempotency_key='LOCAL_E2E_TRANSACTION_APPROVAL'`,
+        [customer],
+      );
+      await db.query(
+        `UPDATE public."SW_TBL_PROFILE_CUST" profile
+         SET "KYC_Status"=0,
+             "KYC_Case_ID"=(
+               SELECT id FROM kyc.cases
+               WHERE customer_msisdn=profile."MSISDN" AND status<>'APPROVED'
+               ORDER BY created_at DESC LIMIT 1
+             ),
+             "KYC_Verified_Date"=NULL,
+             "KYC_Verified_By"=NULL,
+             "Modified_By"='LOCAL_E2E_CLEANUP',
+             "Modified_Date"=CURRENT_TIMESTAMP
+         WHERE profile."MSISDN"=$1::bigint`,
+        [customer],
+      );
+      await db.query(
+        `INSERT INTO public.customer_profile_operation_audit(
+           customer_msisdn,operation,previous_state,new_state,reason,actor_id
+         ) VALUES(
+           $1::bigint,'KYC_UPDATE',jsonb_build_object('kycStatus',1),
+           jsonb_build_object('kycStatus',0),
+           'Restored dedicated transaction test customer to unverified after E2E run',
+           'LOCAL_E2E_CLEANUP'
+         )`,
+        [customer],
+      );
+      await db.query('COMMIT');
+    } catch (cleanupError) {
+      await db.query('ROLLBACK').catch(() => undefined);
+      console.error(`E2E KYC cleanup failed: ${cleanupError.message}`);
+    }
     await db.end();
   }
 }

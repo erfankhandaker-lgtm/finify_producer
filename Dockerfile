@@ -32,6 +32,11 @@ RUN npm ci --omit=dev --legacy-peer-deps && npm cache clean --force
 # Copy necessary files from the build stage
 COPY --from=build /app/dist ./dist
 
+# Keep the forward-only migration runner in the release image so deployment can
+# update the schema using the same immutable image that starts the application.
+COPY scripts/migrate.js ./scripts/migrate.js
+COPY database/migrations ./database/migrations
+
 # Copy other required files for runtime
 COPY locales ./locales
 

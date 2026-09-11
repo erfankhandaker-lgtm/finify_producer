@@ -164,6 +164,7 @@ describe('AdminOperationsService system pulse', () => {
           value_date: '2026-07-30',
           evidence_reference: 'TEST-EVIDENCE',
           business_purpose: 'SAFEGUARDING_FUNDING',
+          funding_classification: 'OWNER_INVESTMENT',
           status: 'PENDING',
           maker_id: 'maker',
           maker_comment: 'Development test funding',
@@ -183,7 +184,7 @@ describe('AdminOperationsService system pulse', () => {
           currency: 'GBP',
         }], 1])
         .mockResolvedValueOnce([{
-          walletId: '9800001115',
+          walletId: '9800001116',
           balance: '0.00',
         }])
         .mockResolvedValueOnce([[{
@@ -219,6 +220,8 @@ describe('AdminOperationsService system pulse', () => {
     });
     expect(manager.query).toHaveBeenCalledTimes(9);
     expect(manager.query.mock.calls[2][1][3]).toBe('CREDIT');
+    expect(manager.query.mock.calls[3][1]).toEqual(['GBP', 116]);
+    expect(manager.query.mock.calls[6][1][14]).toBe('OWNER_CAPITAL');
     expect(manager.query.mock.calls[8][1][7]).toBe('TREASURY_FUNDING');
   });
 
@@ -235,6 +238,7 @@ describe('AdminOperationsService system pulse', () => {
           fundingType: 'CHARGE_REVENUE',
           direction: 'DEBIT',
           businessPurpose: 'GROSS_PROFIT_WITHDRAWAL',
+          fundingClassification: 'NOT_APPLICABLE',
           status: 'PENDING',
         }]),
     };
@@ -263,6 +267,7 @@ describe('AdminOperationsService system pulse', () => {
       id: '9',
       direction: 'DEBIT',
       businessPurpose: 'GROSS_PROFIT_WITHDRAWAL',
+      fundingClassification: 'NOT_APPLICABLE',
     });
     expect(manager.query.mock.calls[1][1]).toEqual([113, 'UGX']);
     expect(manager.query.mock.calls[2][1]).toEqual([
@@ -280,7 +285,28 @@ describe('AdminOperationsService system pulse', () => {
       '2026-07-30',
       'BANK-STATEMENT-9',
       'GROSS_PROFIT_WITHDRAWAL',
+      'NOT_APPLICABLE',
     ]);
+  });
+
+  it('requires an explicit accounting classification for safeguarding movements', async () => {
+    const dataSource = { transaction: jest.fn() };
+    const service = new AdminOperationsService(
+      dataSource as any,
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.createTreasuryFunding({
+      operation: 'ADD_SAFEGUARDING',
+    }, 'maker')).rejects.toMatchObject({
+      response: expect.objectContaining({
+        message: expect.stringContaining('funding classification'),
+      }),
+    });
+    expect(dataSource.transaction).not.toHaveBeenCalled();
   });
 
   it('rejects a treasury withdrawal when the wallet balance is insufficient', async () => {

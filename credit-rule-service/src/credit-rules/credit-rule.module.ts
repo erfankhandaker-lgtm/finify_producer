@@ -5,6 +5,7 @@ import { CreditDecisionController } from './credit-decision.controller';
 import { CreditRuleAdminController } from './credit-rule-admin.controller';
 import { CreditRuleEvaluatorService } from './credit-rule-evaluator.service';
 import { CreditRuleManagementService } from './credit-rule-management.service';
+import { CreditManualReviewService } from './credit-manual-review.service';
 import { HttpSourceService } from './http-source.service';
 import { SourceValidatorService } from './source-validator.service';
 
@@ -15,6 +16,7 @@ import { SourceValidatorService } from './source-validator.service';
     EvaluationApiKeyGuard,
     ConditionEngineService,
     CreditRuleManagementService,
+    CreditManualReviewService,
     CreditRuleEvaluatorService,
     HttpSourceService,
     SourceValidatorService

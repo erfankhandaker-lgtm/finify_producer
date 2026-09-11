@@ -20,6 +20,8 @@ import {
   CreateScoreProviderDto,
   EvaluateCreditDto,
   ListQueryDto,
+  ManualReviewDecisionDto,
+  ManualReviewRecommendationDto,
   RejectDto,
   ReviewDto,
   UpdateHttpIntegrationDto,
@@ -29,6 +31,7 @@ import {
 } from './credit-rule.dto';
 import { CreditRuleEvaluatorService } from './credit-rule-evaluator.service';
 import { CreditRuleManagementService } from './credit-rule-management.service';
+import { CreditManualReviewService } from './credit-manual-review.service';
 import { SourceValidatorService } from './source-validator.service';
 
 @ApiTags('Credit rule administration')
@@ -40,6 +43,7 @@ export class CreditRuleAdminController {
   constructor(
     private readonly management: CreditRuleManagementService,
     private readonly evaluator: CreditRuleEvaluatorService,
+    private readonly manualReviews: CreditManualReviewService,
     private readonly sources: SourceValidatorService
   ) {}
 
@@ -214,7 +218,7 @@ export class CreditRuleAdminController {
   @Get('credit-rule-metadata/capabilities')
   capabilities() {
     return {
-      sourceTypes: ['AI_RESULT', 'POSTGRES', 'HTTP_API'],
+      sourceTypes: ['AI_RESULT', 'DECISION_INPUT', 'POSTGRES', 'HTTP_API'],
       dataTypes: ['STRING', 'DECIMAL', 'INTEGER', 'BOOLEAN', 'DATE', 'DATETIME'],
       readModes: ['SINGLE', 'LATEST', 'SUM', 'AVERAGE', 'COUNT', 'MINIMUM', 'MAXIMUM', 'EXISTS'],
       conditionOperators: [
@@ -227,10 +231,18 @@ export class CreditRuleAdminController {
         'CONTINUE', 'REJECT', 'MANUAL_REVIEW', 'SET_LIMIT_FIXED',
         'SET_LIMIT_FROM_VALUE', 'SET_LIMIT_FROM_VALUE_MULTIPLIER',
         'ADD_LIMIT_FIXED', 'SUBTRACT_LIMIT_FIXED', 'CAP_LIMIT_FIXED',
-        'CAP_LIMIT_FROM_VALUE_MULTIPLIER', 'SET_CREDIT_OFFER'
+        'CAP_LIMIT_FROM_VALUE_MULTIPLIER', 'SET_CREDIT_OFFER',
+        'SET_LIMIT_FROM_INPUT_MULTIPLIER'
       ],
       aiResultFields: [
         'score', 'category', 'modelId', 'modelVersion', 'scoredAt', 'expiresAt', 'referenceId'
+      ],
+      decisionInputFields: [
+        'grade','channel','countryCode','kycStatus','bureauStatus','ageYears',
+        'dominantCashFlow','modelProposedLimit','telecomTenureMonths','currentDpd',
+        'count30PlusDpd6Months','maxDpd6Months','maxDpd12Months','currentOpenLoans',
+        'dpd30Days','dpd60Days','dpd90Days','churnBand','dormantAfterAllocation',
+        'schoolAggregatorTermPaid'
       ]
     };
   }
@@ -243,6 +255,28 @@ export class CreditRuleAdminController {
   @Get('credit-rule-executions/:id')
   getExecution(@Param('id') id: string) {
     return this.evaluator.getExecution(id);
+  }
+
+  @Get('credit-manual-reviews')
+  listManualReviews(@Query() query: ListQueryDto) {
+    return this.manualReviews.list(query);
+  }
+
+  @Get('credit-manual-reviews/:id')
+  getManualReview(@Param('id') id: string) {
+    return this.manualReviews.get(id);
+  }
+
+  @Post('credit-manual-reviews/:id/recommend')
+  recommendManualReview(@Param('id') id: string,@Body() dto: ManualReviewRecommendationDto,
+    @Headers('x-actor-id') actor?: string) {
+    return this.manualReviews.recommend(id,dto,this.actor(actor));
+  }
+
+  @Post('credit-manual-reviews/:id/decide')
+  decideManualReview(@Param('id') id: string,@Body() dto: ManualReviewDecisionDto,
+    @Headers('x-actor-id') actor?: string) {
+    return this.manualReviews.decide(id,dto,this.actor(actor));
   }
 
   private actor(value?: string): string {

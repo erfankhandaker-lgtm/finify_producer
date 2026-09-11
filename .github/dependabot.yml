@@ -1,0 +1,28 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: npm
+    directory: /
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      root-dependencies: { patterns: ['*'] }
+  - package-ecosystem: npm
+    directory: /admin-ui
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3
+    groups:
+      admin-ui-dependencies: { patterns: ['*'] }
+  - package-ecosystem: npm
+    directory: /portal-ui
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3
+    groups:
+      portal-ui-dependencies: { patterns: ['*'] }
+  - package-ecosystem: pip
+    directory: /kyc-ocr-service
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 3

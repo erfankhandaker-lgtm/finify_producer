@@ -1,0 +1,15 @@
+BEGIN;
+DROP TRIGGER IF EXISTS credit_execution_manual_review_case ON public.credit_rule_executions;
+DROP FUNCTION IF EXISTS public.create_credit_manual_review_case();
+DELETE FROM public.credit_rules WHERE master_rule_id IN (SELECT id FROM public.credit_master_rules WHERE rule_code='UGA_RETAIL_CREDIT_POLICY' AND version=2);
+DELETE FROM public.credit_master_rules WHERE rule_code='UGA_RETAIL_CREDIT_POLICY' AND version=2;
+UPDATE public.credit_score_providers SET is_active=false,is_default=false,provider_mode='HTTP' WHERE code='FINIFY_SCORE_MODEL_UGA_V1';
+DROP TABLE IF EXISTS public.credit_manual_review_actions;
+DROP TABLE IF EXISTS public.credit_manual_review_cases;
+DROP TABLE IF EXISTS public.credit_manual_review_queues;
+DROP TABLE IF EXISTS public.credit_product_bindings;
+DROP TABLE IF EXISTS public.credit_lenders;
+DROP TABLE IF EXISTS public.credit_reason_catalogue;
+ALTER TABLE public.credit_rule_executions DROP COLUMN IF EXISTS decision_inputs;
+ALTER TABLE public.credit_score_providers DROP COLUMN IF EXISTS provider_mode;
+COMMIT;

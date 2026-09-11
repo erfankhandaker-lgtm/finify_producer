@@ -1,0 +1,1152 @@
+{
+  "info": {
+    "_postman_id": "626d25d0-4d67-4c65-9c35-a7ec22576f68",
+    "name": "FINIFY Customer Onboarding Journey API",
+    "description": "Customer-app collection for the configurable FINIFY onboarding runtime.\n\nImport the matching local environment, configure tenantId and phoneNumber, then run requests in numeric order.\nThe resume token is a bearer-like secret: never log, expose or persist it outside secure application storage.\nOnly START and PHONE_CAPTURE use the generic step endpoint. Verified nodes use dedicated FINIFY services.\nSee docs/customer-onboarding-api.md for the complete integration contract.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "onboardingInstanceId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "onboardingCustomerId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "onboardingResumeToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "currentNodeKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "currentNodeType",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "lastStepNodeKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "lastStepIdempotencyKey",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "channelHandoffToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "otpCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "consentVersionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "formVersionId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "kycCaseId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "00 - Connectivity",
+      "description": "Gateway availability only; it does not prove an onboarding journey is configured.",
+      "item": [
+        {
+          "name": "Gateway readiness",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{baseUrl}}/hello",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Gateway is ready\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "01 - Start and resume",
+      "description": "Creates or resumes the durable pre-auth onboarding instance selected by tenant, country, channel and customer type.",
+      "item": [
+        {
+          "name": "Start or resume journey",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances",
+            "description": "Returns instanceId and a rotated resumeToken. A matching in-progress journey is resumed instead of duplicated.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenantId\": \"{{tenantId}}\",\n  \"countryCode\": \"{{countryCode}}\",\n  \"channelCode\": \"{{channelCode}}\",\n  \"customerType\": \"{{customerType}}\",\n  \"phoneNumber\": \"{{phoneNumber}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Journey started or resumed\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);",
+                  "pm.test(\"Runtime identifiers were returned\", function () {",
+                  "  pm.expect(data.instanceId).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(data.customerId).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(data.resumeToken).to.be.a(\"string\").and.have.length.above(19);",
+                  "  pm.expect(data.currentNodeType).to.eql(\"START\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Resume with token",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/resume?token={{onboardingResumeToken}}",
+            "description": "Returns the latest durable state. The current API carries the resume token in the query string; suppress URL logging."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Journey resumed\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);",
+                  "pm.test(\"Same instance is returned\", () => pm.expect(data.instanceId).to.eql(pm.collectionVariables.get(\"onboardingInstanceId\")));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "02 - Generic progression",
+      "description": "Use only for START and PHONE_CAPTURE. Each logical step gets a new idempotency key.",
+      "item": [
+        {
+          "name": "Advance START",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{lastStepIdempotencyKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/steps",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nodeKey\": \"{{lastStepNodeKey}}\",\n  \"outcome\": \"SUCCESS\",\n  \"output\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const currentNodeKey = pm.collectionVariables.get(\"currentNodeKey\");",
+                  "if (!currentNodeKey) throw new Error(\"Run Start or resume journey first\");",
+                  "pm.collectionVariables.set(\"lastStepNodeKey\", currentNodeKey);",
+                  "pm.collectionVariables.set(\"lastStepIdempotencyKey\", `onboarding-${pm.variables.replaceIn(\"{{$guid}}\")}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"START advanced\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);",
+                  "pm.test(\"Request was not a replay\", () => pm.expect(data.replayed).to.eql(false));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Replay last step safely",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{lastStepIdempotencyKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/steps",
+            "description": "Same key plus byte-equivalent logical input returns the current state with replayed=true.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nodeKey\": \"{{lastStepNodeKey}}\",\n  \"outcome\": \"SUCCESS\",\n  \"output\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Replay accepted\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "pm.test(\"Replay was recognised\", () => pm.expect(data.replayed).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Advance PHONE_CAPTURE",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{lastStepIdempotencyKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/steps",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nodeKey\": \"{{lastStepNodeKey}}\",\n  \"outcome\": \"SUCCESS\",\n  \"output\": {\n    \"captured\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const currentNodeKey = pm.collectionVariables.get(\"currentNodeKey\");",
+                  "if (!currentNodeKey) throw new Error(\"Run Start or resume journey first\");",
+                  "pm.collectionVariables.set(\"lastStepNodeKey\", currentNodeKey);",
+                  "pm.collectionVariables.set(\"lastStepIdempotencyKey\", `onboarding-${pm.variables.replaceIn(\"{{$guid}}\")}`);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PHONE_CAPTURE advanced\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "03 - Safety checks",
+      "description": "Negative checks. Run deliberately after the matching progression request.",
+      "item": [
+        {
+          "name": "Reject reused key with changed input",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{lastStepIdempotencyKey}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/steps",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nodeKey\": \"{{lastStepNodeKey}}\",\n  \"outcome\": \"SUCCESS\",\n  \"output\": {\n    \"changed\": true\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Changed input is rejected\", () => pm.response.to.have.status(409));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject verified-node bypass",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "boundary-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/steps",
+            "description": "Expected when currentNodeType is OTP_VERIFICATION, PIN_SETUP, KYC, wallet or credit-related.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nodeKey\": \"{{currentNodeKey}}\",\n  \"outcome\": \"SUCCESS\",\n  \"output\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Dedicated-service boundary is enforced\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Error identifies the dedicated service boundary\", () => pm.expect(pm.response.json().message).to.include(\"dedicated verified onboarding service\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "04 - Verified runtime",
+      "description": "Dedicated customer-safe contracts. Run only when currentNodeType matches the request.",
+      "item": [
+        {
+          "name": "Create OTP challenge",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "otp-send-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/otp/challenges",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OTP challenge created\",()=>pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if(data.developmentCode) pm.collectionVariables.set(\"otpCode\",data.developmentCode);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "otp-verify-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/otp/verify",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{otpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"OTP verified\",()=>pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create secure PIN",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "pin-create-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/pin",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pin\": \"4827\",\n  \"confirmPin\": \"4827\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"PIN created\",()=>pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Accept consent version",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "consent-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/consents",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"consentVersionId\": \"{{consentVersionId}}\",\n  \"accepted\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Consent recorded\",()=>pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit configured profile",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "profile-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/profile",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"formVersionId\": \"{{formVersionId}}\",\n  \"response\": {\n    \"givenName\": \"Amina\",\n    \"familyName\": \"Nsubuga\",\n    \"dateOfBirth\": \"1990-01-01\",\n    \"nationality\": \"UGA\",\n    \"residentialAddress\": \"Kampala\",\n    \"occupation\": \"Trader\",\n    \"sourceOfIncome\": \"BUSINESS\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Profile recorded\",()=>pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create linked KYC case",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "kyc-create-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/kyc",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentType\": \"UGANDA_NATIONAL_ID\",\n  \"issuingCountry\": \"UGA\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"KYC case linked\",()=>pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if(data.kycCaseId) pm.collectionVariables.set(\"kycCaseId\",data.kycCaseId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get customer-safe KYC status",
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/kyc",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"KYC status returned\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Submit KYC verification",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/kyc/verify",
+            "description": ""
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"KYC submitted\",()=>pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Allocate configured wallet",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "wallet-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/wallet",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Wallet allocated\",()=>pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05 - Cross-channel handoff",
+      "description": "Use only when the current node type is CHANNEL_HANDOFF. The target channel consumes a one-time token and receives a rotated resume token.",
+      "item": [
+        {
+          "name": "Create channel handoff",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Onboarding-Resume-Token",
+                "value": "{{onboardingResumeToken}}",
+                "type": "text"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "handoff-{{$guid}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/instances/{{onboardingInstanceId}}/handoffs",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"expiresInSeconds\": 300\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Handoff issued\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.handoffToken) pm.collectionVariables.set(\"channelHandoffToken\", data.handoffToken);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Consume handoff on target channel",
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              },
+              {
+                "key": "X-Correlation-ID",
+                "value": "onboarding-{{$guid}}",
+                "type": "text",
+                "description": "Client-generated trace identifier. Use a new value for each logical operation."
+              },
+              {
+                "key": "X-Finify-Channel-Client-ID",
+                "value": "{{channelClientId}}",
+                "type": "text"
+              },
+              {
+                "key": "X-Finify-Channel-Credential",
+                "value": "{{channelClientCredential}}",
+                "type": "text"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/onboarding/handoffs/consume",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"handoffToken\": \"{{channelHandoffToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Handoff consumed\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Response uses the FINIFY envelope\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body).to.have.property(\"issuccess\");",
+                  "  pm.expect(body).to.have.property(\"statusCode\");",
+                  "  pm.expect(body).to.have.property(\"payload\");",
+                  "});",
+                  "const body = pm.response.json();",
+                  "const data = body.payload || body;",
+                  "if (data.instanceId) pm.collectionVariables.set(\"onboardingInstanceId\", data.instanceId);",
+                  "if (data.customerId) pm.collectionVariables.set(\"onboardingCustomerId\", data.customerId);",
+                  "if (data.resumeToken) pm.collectionVariables.set(\"onboardingResumeToken\", data.resumeToken);",
+                  "if (data.currentNodeKey) pm.collectionVariables.set(\"currentNodeKey\", data.currentNodeKey);",
+                  "if (data.currentNodeType) pm.collectionVariables.set(\"currentNodeType\", data.currentNodeType);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

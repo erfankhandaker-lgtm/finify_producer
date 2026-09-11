@@ -1,0 +1,67 @@
+{
+  "info": {
+    "name": "Finify Governed Credit Processing",
+    "description": "A-J credit decision, traceable reasons, and maker-checker manual review. An eligible decision remains in MANUAL_REVIEW until an approved commercial binding is active.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080/finify" },
+    { "key": "evaluationApiKey", "value": "" },
+    { "key": "adminApiKey", "value": "" },
+    { "key": "reviewCaseId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Evaluate A-J credit decision",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{evaluationApiKey}}" }
+        ],
+        "url": "{{baseUrl}}/v1/credit-decisions/evaluate",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerId\": \"customer-123\",\n  \"applicationId\": \"application-123\",\n  \"productId\": \"UGA_RETAIL_CREDIT\",\n  \"currency\": \"UGX\",\n  \"requestedAmount\": 500000,\n  \"existingExposure\": 0,\n  \"pendingReservations\": 0,\n  \"aiResult\": {\n    \"score\": 850,\n    \"category\": \"A\",\n    \"modelId\": \"finify-score-model\",\n    \"modelVersion\": \"1\"\n  },\n  \"scoreProviderCode\": \"FINIFY_SCORE_MODEL_UGA_V1\",\n  \"decisionInputs\": {\n    \"grade\": \"A\",\n    \"channel\": \"APP\",\n    \"countryCode\": \"UGA\",\n    \"kycStatus\": \"VERIFIED\",\n    \"bureauStatus\": \"PASS\",\n    \"ageYears\": 35,\n    \"dominantCashFlow\": 400000,\n    \"modelProposedLimit\": 1200000,\n    \"telecomTenureMonths\": 36,\n    \"currentDpd\": 0,\n    \"count30PlusDpd6Months\": 0,\n    \"maxDpd6Months\": 0,\n    \"maxDpd12Months\": 0,\n    \"currentOpenLoans\": 0,\n    \"dpd30Days\": 0,\n    \"dpd60Days\": 0,\n    \"dpd90Days\": 0,\n    \"churnBand\": 1,\n    \"dormantAfterAllocation\": false,\n    \"schoolAggregatorTermPaid\": true\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "List manual-review work queue",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "x-api-key", "value": "{{adminApiKey}}" },
+          { "key": "x-actor-id", "value": "credit-reviewer" }
+        ],
+        "url": "{{baseUrl}}/v1/credit-manual-reviews?status=PENDING"
+      }
+    },
+    {
+      "name": "Record review recommendation",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{adminApiKey}}" },
+          { "key": "x-actor-id", "value": "credit-reviewer" }
+        ],
+        "url": "{{baseUrl}}/v1/credit-manual-reviews/{{reviewCaseId}}/recommend",
+        "body": { "mode": "raw", "raw": "{\n  \"recommendation\": \"APPROVE\",\n  \"reasonCode\": \"MANUAL_APPROVED\",\n  \"comment\": \"Documented review rationale\",\n  \"recommendedLimit\": 1200000\n}" }
+      }
+    },
+    {
+      "name": "Independent final decision",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-api-key", "value": "{{adminApiKey}}" },
+          { "key": "x-actor-id", "value": "credit-approver" }
+        ],
+        "url": "{{baseUrl}}/v1/credit-manual-reviews/{{reviewCaseId}}/decide",
+        "body": { "mode": "raw", "raw": "{\n  \"decision\": \"APPROVED\",\n  \"reasonCode\": \"MANUAL_APPROVED\",\n  \"comment\": \"Independent approval rationale\",\n  \"approvedLimit\": 1200000\n}" }
+      }
+    }
+  ]
+}

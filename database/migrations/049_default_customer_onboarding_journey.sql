@@ -1,0 +1,110 @@
+BEGIN;
+
+INSERT INTO onboarding.channel_definitions(
+  id,tenant_id,code,name,description,is_enabled,created_by
+) VALUES(
+  '00000000-0000-4000-8001-000000000001',
+  '00000000-0000-4000-8000-000000000001',
+  'MOBILE_APP','Default mobile application',
+  'Development bootstrap channel. Replace its authentication mode and client registration before production use.',
+  true,'bootstrap'
+) ON CONFLICT(tenant_id,code) DO NOTHING;
+
+INSERT INTO onboarding.channel_versions(
+  id,channel_definition_id,version_number,status,authentication_mode,
+  session_timeout_seconds,resume_timeout_seconds,configuration,
+  created_by,modified_by,approved_by,approved_at,activated_at
+) VALUES(
+  '00000000-0000-4000-8002-000000000001',
+  '00000000-0000-4000-8001-000000000001',1,'ACTIVE','PUBLIC_PREAUTH',
+  900,604800,'{"developmentDefault":true}'::jsonb,
+  'bootstrap','bootstrap','bootstrap-checker',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP
+) ON CONFLICT(channel_definition_id,version_number) DO NOTHING;
+
+INSERT INTO onboarding.channel_country_scopes(channel_version_id,country_code)
+VALUES('00000000-0000-4000-8002-000000000001','UGA')
+ON CONFLICT(channel_version_id,country_code) DO NOTHING;
+
+INSERT INTO onboarding.channel_node_capabilities(
+  channel_version_id,node_type,execution_mode,component_key
+)
+SELECT '00000000-0000-4000-8002-000000000001'::uuid,node.code,
+       CASE WHEN node.code IN (
+         'WALLET_ALLOCATION','CREDIT_SCORE','CREDIT_POLICY','LIMIT_ALLOCATION','DECISION'
+       ) THEN 'SERVER_ONLY' ELSE 'DIRECT' END,
+       CASE WHEN node.code IN (
+         'START','END','WALLET_ALLOCATION','CREDIT_SCORE','CREDIT_POLICY','LIMIT_ALLOCATION','DECISION'
+       ) THEN NULL ELSE lower(node.code) END
+FROM onboarding.node_type_catalogue node
+ON CONFLICT(channel_version_id,node_type) DO NOTHING;
+
+INSERT INTO onboarding.journey_definitions(
+  id,tenant_id,code,name,description,created_by
+) VALUES(
+  '00000000-0000-4000-8003-000000000001',
+  '00000000-0000-4000-8000-000000000001',
+  'DEFAULT_CUSTOMER_ONBOARDING','Default customer onboarding',
+  'Governed baseline: phone, OTP, PIN, consent, profile, KYC, wallet, scoring, credit policy, decision and limit allocation.',
+  'bootstrap'
+) ON CONFLICT(tenant_id,code) DO NOTHING;
+
+INSERT INTO onboarding.journey_versions(
+  id,journey_definition_id,version_number,status,revision,change_summary,created_by,modified_by
+) VALUES(
+  '00000000-0000-4000-8004-000000000001',
+  '00000000-0000-4000-8003-000000000001',1,'DRAFT',1,
+  'Development default. Bind approved KYC, score-provider, credit-policy and consent/form versions before submission.',
+  'bootstrap','bootstrap'
+) ON CONFLICT(journey_definition_id,version_number) DO NOTHING;
+
+INSERT INTO onboarding.journey_scopes(
+  id,journey_version_id,country_code,channel_code,customer_type,priority,
+  channel_definition_id,channel_version_id
+) VALUES(
+  '00000000-0000-4000-8100-000000000001',
+  '00000000-0000-4000-8004-000000000001','UGA','MOBILE_APP','INDIVIDUAL',100,
+  '00000000-0000-4000-8001-000000000001','00000000-0000-4000-8002-000000000001'
+) ON CONFLICT(journey_version_id,country_code,channel_code,customer_type) DO NOTHING;
+
+INSERT INTO onboarding.journey_nodes(
+  id,journey_version_id,node_key,node_type,name,configuration,position_x,position_y,is_entry
+) VALUES
+  ('00000000-0000-4000-8200-000000000001','00000000-0000-4000-8004-000000000001','start','START','Start','{}',40,220,true),
+  ('00000000-0000-4000-8200-000000000002','00000000-0000-4000-8004-000000000001','phone','PHONE_CAPTURE','Capture phone number','{}',250,220,false),
+  ('00000000-0000-4000-8200-000000000003','00000000-0000-4000-8004-000000000001','otp','OTP_VERIFICATION','Verify phone number','{"policyCode":"DEFAULT_OTP"}',460,220,false),
+  ('00000000-0000-4000-8200-000000000004','00000000-0000-4000-8004-000000000001','pin','PIN_SETUP','Create secure PIN','{"minimumLength":4,"maximumAttempts":5}',670,220,false),
+  ('00000000-0000-4000-8200-000000000005','00000000-0000-4000-8004-000000000001','consent','CONSENT','Capture customer consent','{"consentVersionId":"DEFAULT_CUSTOMER_CONSENT"}',880,220,false),
+  ('00000000-0000-4000-8200-000000000006','00000000-0000-4000-8004-000000000001','profile','FORM','Capture customer profile','{"formVersionId":"DEFAULT_CUSTOMER_PROFILE"}',1090,220,false),
+  ('00000000-0000-4000-8200-000000000007','00000000-0000-4000-8004-000000000001','kyc','KYC','Identity verification','{"kycConfigurationCode":"DEFAULT_KYC"}',1300,220,false),
+  ('00000000-0000-4000-8200-000000000008','00000000-0000-4000-8004-000000000001','wallet','WALLET_ALLOCATION','Allocate customer wallet','{"walletType":103,"currency":"UGX","pricingPlanCode":"DEFAULT_RETAIL"}',1510,220,false),
+  ('00000000-0000-4000-8200-000000000009','00000000-0000-4000-8004-000000000001','score','CREDIT_SCORE','Generate credit score','{"providerCode":"DEFAULT_SCORE_PROVIDER"}',1720,220,false),
+  ('00000000-0000-4000-8200-000000000010','00000000-0000-4000-8004-000000000001','policy','CREDIT_POLICY','Evaluate credit policy','{"policyCode":"DEFAULT_CREDIT_POLICY"}',1930,220,false),
+  ('00000000-0000-4000-8200-000000000011','00000000-0000-4000-8004-000000000001','decision','DECISION','Credit decision','{}',2140,220,false),
+  ('00000000-0000-4000-8200-000000000012','00000000-0000-4000-8004-000000000001','limit','LIMIT_ALLOCATION','Allocate credit limit','{}',2350,120,false),
+  ('00000000-0000-4000-8200-000000000013','00000000-0000-4000-8004-000000000001','manual_review','MANUAL_REVIEW','Manual credit review','{}',2350,320,false),
+  ('00000000-0000-4000-8200-000000000014','00000000-0000-4000-8004-000000000001','complete','END','Onboarding complete','{"result":"APPROVED"}',2560,120,false),
+  ('00000000-0000-4000-8200-000000000015','00000000-0000-4000-8004-000000000001','rejected','END','Application not approved','{"result":"REJECTED"}',2560,420,false)
+ON CONFLICT(journey_version_id,node_key) DO NOTHING;
+
+INSERT INTO onboarding.journey_transitions(
+  journey_version_id,from_node_id,to_node_id,outcome_code,priority
+) VALUES
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000001','00000000-0000-4000-8200-000000000002','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000002','00000000-0000-4000-8200-000000000003','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000003','00000000-0000-4000-8200-000000000004','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000004','00000000-0000-4000-8200-000000000005','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000005','00000000-0000-4000-8200-000000000006','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000006','00000000-0000-4000-8200-000000000007','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000007','00000000-0000-4000-8200-000000000008','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000008','00000000-0000-4000-8200-000000000009','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000009','00000000-0000-4000-8200-000000000010','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000010','00000000-0000-4000-8200-000000000011','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000011','00000000-0000-4000-8200-000000000012','APPROVED',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000011','00000000-0000-4000-8200-000000000013','MANUAL_REVIEW',2),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000011','00000000-0000-4000-8200-000000000015','REJECTED',3),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000012','00000000-0000-4000-8200-000000000014','SUCCESS',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000013','00000000-0000-4000-8200-000000000012','APPROVED',1),
+  ('00000000-0000-4000-8004-000000000001','00000000-0000-4000-8200-000000000013','00000000-0000-4000-8200-000000000015','REJECTED',2)
+ON CONFLICT(journey_version_id,from_node_id,outcome_code,priority) DO NOTHING;
+
+COMMIT;

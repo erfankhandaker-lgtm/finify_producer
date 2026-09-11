@@ -99,8 +99,17 @@ services:
       INTEGRATION_SECRET_KEY: finify-local-development-secret-key-change-me
       ADMIN_MFA_ENCRYPTION_KEY: finify-local-mfa-encryption-key-change-before-production
       FINIFY_SECRET_ENCRYPTION_KEY: finify-local-secret-encryption-key-change-before-production
+      ONBOARDING_PII_ENCRYPTION_KEY: ${ONBOARDING_PII_ENCRYPTION_KEY:-ZmluaWZ5LWxvY2FsLW9uYm9hcmRpbmcta2V5LTMyISE=}
+      ONBOARDING_HANDOFF_SIGNING_KEY: ${ONBOARDING_HANDOFF_SIGNING_KEY:-finify-local-handoff-signing-key-change-me}
+      ONBOARDING_OTP_HMAC_KEY: ${ONBOARDING_OTP_HMAC_KEY:-finify-local-otp-hmac-key-change-before-production}
+      ONBOARDING_OTP_DEV_EXPOSE: ${ONBOARDING_OTP_DEV_EXPOSE:-true}
+      ONBOARDING_CALLBACK_KEY: ${ONBOARDING_CALLBACK_KEY:-finify-local-onboarding-callback-key-change-me}
+      KYC_SERVICE_URL: ${KYC_SERVICE_URL:-http://kyc:5006}
       ADMIN_MFA_ISSUER: Finify Local Admin
       TURNSTILE_SECRET_KEY: 1x0000000000000000000000000000000AA
+    healthcheck:
+      start_period: 180s
+      retries: 20
 
   admin-ui:
     build:

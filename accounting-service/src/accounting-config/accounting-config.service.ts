@@ -138,6 +138,8 @@ export class AccountingConfigService {
       { walletCode: 113, purpose: 'SYSTEM' },
       { walletCode: 114, purpose: 'SYSTEM' },
       { walletCode: 115, purpose: 'SYSTEM' },
+      { walletCode: 116, purpose: 'SYSTEM' },
+      { walletCode: 117, purpose: 'SYSTEM' },
     ] as const;
     return this.dataSource.transaction(async manager => {
       await manager.query(

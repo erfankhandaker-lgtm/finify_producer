@@ -1,5 +1,18 @@
 # Finify Service Producer
 
+## Customer onboarding API
+
+The customer-app onboarding contract, security rules and node-dispatch guidance are documented in [docs/customer-onboarding-api.md](docs/customer-onboarding-api.md). Generate its focused Postman collection and local Kong environment with:
+
+The retained development baseline is documented in [docs/default-customer-onboarding-journey.md](docs/default-customer-onboarding-journey.md).
+
+```bash
+npm run postman:onboarding
+npm run postman:onboarding:validate
+```
+
+Set the exported environment's blank `tenantId` to an active test tenant before running the collection. Do not place production tenant identifiers, resume tokens, phone numbers or credentials in committed Postman files.
+
 ## Local Docker stack
 
 The repository runs Kong Gateway, the two Next.js interfaces, the producer,
@@ -90,9 +103,11 @@ npm run start:dev
 
 Use `.env.example` as a template for local configuration. Do not commit `.env` to source control.
 
-## Docker CI
+## CI/CD
 
-GitHub Actions builds and pushes a Docker image using `.github/workflows/docker-image.yml`.
+GitHub Actions validates every service and migration, scans the code, publishes
+immutable SHA-tagged images to GHCR, and provides protected staging/production
+deployment workflows. See [`docs/ci-cd.md`](docs/ci-cd.md) for setup and rollback.
 
 ## Notes
 

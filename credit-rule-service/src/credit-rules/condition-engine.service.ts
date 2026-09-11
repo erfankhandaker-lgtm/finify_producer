@@ -45,7 +45,7 @@ export class ConditionEngineService {
     const allowed = new Set([
       'CONTINUE','REJECT','MANUAL_REVIEW','SET_LIMIT_FIXED','SET_LIMIT_FROM_VALUE',
       'SET_LIMIT_FROM_VALUE_MULTIPLIER','ADD_LIMIT_FIXED','SUBTRACT_LIMIT_FIXED',
-      'CAP_LIMIT_FIXED','CAP_LIMIT_FROM_VALUE_MULTIPLIER','SET_CREDIT_OFFER'
+      'CAP_LIMIT_FIXED','CAP_LIMIT_FROM_VALUE_MULTIPLIER','SET_CREDIT_OFFER','SET_LIMIT_FROM_INPUT_MULTIPLIER'
     ]);
     if (!allowed.has(String(candidate.type))) throw new BadRequestException(`Unsupported rule action ${candidate.type}`);
     const numericTypes = new Set([
@@ -61,6 +61,14 @@ export class ConditionEngineService {
     if (candidate.type === 'SET_CREDIT_OFFER' && !Number.isFinite(Number(candidate.limit))) {
       throw new BadRequestException('SET_CREDIT_OFFER requires a numeric limit');
     }
+    if (candidate.type === 'SET_LIMIT_FROM_INPUT_MULTIPLIER') {
+      if (!candidate.inputField || typeof candidate.inputField !== 'string') {
+        throw new BadRequestException('SET_LIMIT_FROM_INPUT_MULTIPLIER requires inputField');
+      }
+      if (!Number.isFinite(Number(candidate.multiplier))) {
+        throw new BadRequestException('SET_LIMIT_FROM_INPUT_MULTIPLIER requires a numeric multiplier');
+      }
+    }
     if (candidate.repaymentOptionIds !== undefined
       && (!Array.isArray(candidate.repaymentOptionIds)
         || candidate.repaymentOptionIds.some((value) => typeof value !== 'string'))) {
@@ -75,6 +83,8 @@ export class ConditionEngineService {
       if (condition.not) return !this.evaluate(condition.not, rawValue, dataType);
     }
     const leaf = condition as ConditionLeaf;
+    if (leaf.field) rawValue = this.readField(rawValue,leaf.field);
+    dataType = leaf.dataType ?? dataType;
     if (leaf.operator === 'IS_NULL') return rawValue === null || rawValue === undefined;
     if (leaf.operator === 'IS_NOT_NULL') return rawValue !== null && rawValue !== undefined;
     const actual = this.coerce(rawValue, dataType);
@@ -137,5 +147,12 @@ export class ConditionEngineService {
 
   private isGroup(node: ConditionNode): node is ConditionGroup {
     return 'all' in node || 'any' in node || 'not' in node;
+  }
+
+  private readField(value: unknown,path: string): unknown {
+    return path.split('.').filter(Boolean).reduce<unknown>((current,key) => {
+      if (!current || typeof current !== 'object') return undefined;
+      return (current as Record<string,unknown>)[key];
+    },value);
   }
 }

@@ -234,6 +234,7 @@ export class AdminOperationsService {
     return this.dataSource.query(
       `SELECT request.id::text,request.funding_type AS "fundingType",
               request.direction,request.business_purpose AS "businessPurpose",
+              request.funding_classification AS "fundingClassification",
               request.wallet_msisdn::text AS "walletId",
               request.wallet_code AS "walletCode",type."Wallet_Name" AS "walletName",
               request.currency,request.amount::numeric AS amount,request.reference,
@@ -305,6 +306,27 @@ export class AdminOperationsService {
     if (!operation) {
       throw new BadRequestException(
         'Operation must add safeguarding, add commission funding, withdraw safeguarding, or withdraw charge revenue',
+      );
+    }
+    const requestedClassification = String(body.fundingClassification || '')
+      .trim()
+      .toUpperCase();
+    const safeguardingClassifications = [
+      'OWNER_INVESTMENT',
+      'CUSTOMER_FUNDS',
+      'BANK_PREFUNDING',
+    ];
+    let fundingClassification = 'NOT_APPLICABLE';
+    if (operation.fundingType === 'SAFEGUARDING') {
+      if (!safeguardingClassifications.includes(requestedClassification)) {
+        throw new BadRequestException(
+          'Safeguarding funding classification must be owner investment, customer funds, or bank prefunding',
+        );
+      }
+      fundingClassification = requestedClassification;
+    } else if (requestedClassification && requestedClassification !== 'NOT_APPLICABLE') {
+      throw new BadRequestException(
+        'Funding classification applies only to safeguarding movements',
       );
     }
     const currency = String(body.currency || '').trim().toUpperCase();
@@ -394,10 +416,11 @@ export class AdminOperationsService {
           `INSERT INTO public.treasury_funding_requests(
              funding_type,wallet_msisdn,wallet_code,currency,amount,reference,
              maker_id,maker_comment,direction,bank_name,bank_account,value_date,
-             evidence_reference,business_purpose
-           ) VALUES($1,$2::bigint,$3,$4,$5::numeric,$6,$7,$8,$9,$10,$11,$12::date,$13,$14)
+             evidence_reference,business_purpose,funding_classification
+           ) VALUES($1,$2::bigint,$3,$4,$5::numeric,$6,$7,$8,$9,$10,$11,$12::date,$13,$14,$15)
            RETURNING id::text,funding_type AS "fundingType",
                      direction,business_purpose AS "businessPurpose",
+                     funding_classification AS "fundingClassification",
                      wallet_msisdn::text AS "walletId",wallet_code AS "walletCode",
                      currency,amount::numeric,reference,status,
                      bank_name AS "bankName",bank_account AS "bankAccount",
@@ -419,6 +442,7 @@ export class AdminOperationsService {
             valueDate,
             evidenceReference,
             operation.businessPurpose,
+            fundingClassification,
           ],
         );
         if (evidenceDocument) {
@@ -490,6 +514,29 @@ export class AdminOperationsService {
         throw new ConflictException('The target system wallet is not active');
       }
       const direction = request.direction === 'DEBIT' ? 'DEBIT' : 'CREDIT';
+      const safeguardingContra = {
+        OWNER_INVESTMENT: {
+          walletCode: 116,
+          category: 'OWNER_CAPITAL',
+          accountPrefix: 'OWNER_CAPITAL',
+          creditDescription: 'Owner capital investment',
+          debitDescription: 'Owner capital reduction',
+        },
+        CUSTOMER_FUNDS: {
+          walletCode: 117,
+          category: 'CUSTOMER_FUNDS_LIABILITY',
+          accountPrefix: 'CUSTOMER_FUNDS',
+          creditDescription: 'Customer safeguarding funds liability',
+          debitDescription: 'Customer safeguarding funds reduction',
+        },
+        BANK_PREFUNDING: {
+          walletCode: 115,
+          category: 'BANK_PREFUNDING',
+          accountPrefix: 'BANK_PREFUNDING',
+          creditDescription: 'Bank or partner prefunding liability',
+          debitDescription: 'Bank or partner prefunding reduction',
+        },
+      } as const;
       if (id.length > 17) {
         throw new Error('Treasury request identifier exceeds the accounting namespace');
       }
@@ -525,23 +572,29 @@ export class AdminOperationsService {
       }
       let accountingJournalId: string | null = null;
       if (request.funding_type === 'SAFEGUARDING') {
+        const classification = String(request.funding_classification || 'BANK_PREFUNDING')
+          .toUpperCase() as keyof typeof safeguardingContra;
+        const contra = safeguardingContra[classification];
+        if (!contra) {
+          throw new ConflictException('The safeguarding funding classification is invalid');
+        }
         const sourceWallets = await manager.query(
           `SELECT "Wallet_MSISDN"::text AS "walletId","Amount"::numeric AS balance
            FROM public."SW_TBL_WALLET"
-           WHERE owner_type='SYSTEM' AND "Wallet_Code"=115
+           WHERE owner_type='SYSTEM' AND "Wallet_Code"=$2
              AND upper(currency)=upper($1) AND "Status"=0
            FOR UPDATE`,
-          [request.currency],
+          [request.currency, contra.walletCode],
         );
         if (sourceWallets.length !== 1) {
           throw new ConflictException(
-            `Exactly one Treasury funding source account is required for ${request.currency}`,
+            `Exactly one ${classification.replace(/_/g, ' ').toLowerCase()} control account is required for ${request.currency}`,
           );
         }
         const sourceWallet = sourceWallets[0];
         if (direction === 'DEBIT' && Number(sourceWallet.balance) < Number(request.amount)) {
           throw new ConflictException(
-            `Insufficient Treasury funding source balance for ${request.currency}`,
+            `Insufficient ${classification.replace(/_/g, ' ').toLowerCase()} balance for ${request.currency}`,
           );
         }
         const fundingSourceResult = await manager.query(
@@ -582,6 +635,7 @@ export class AdminOperationsService {
             JSON.stringify({
               treasuryRequestId: id,
               fundingType: request.funding_type,
+              fundingClassification: classification,
               direction,
               businessPurpose: request.business_purpose,
               bankName: request.bank_name,
@@ -616,11 +670,9 @@ export class AdminOperationsService {
              CASE WHEN $8='CREDIT' THEN $2::numeric ELSE 0 END,
              CURRENT_TIMESTAMP,
              (SELECT id FROM public.sw_tbl_accounting_category
-              WHERE accountname='TREASURY_FUNDING'),
+              WHERE accountname=$15),
              $11::bigint,$4::bigint,2,$12,$6,
-             CASE WHEN $8='CREDIT'
-               THEN 'Treasury funding source'
-               ELSE 'Treasury funding source reduction' END,
+             CASE WHEN $8='CREDIT' THEN $16 ELSE $17 END,
              $13::numeric,$14::numeric,
              jsonb_build_object('treasuryRequestId',$10::bigint,'direction',$8))`,
           [
@@ -635,9 +687,12 @@ export class AdminOperationsService {
             fundedBalance,
             id,
             sourceWallet.walletId,
-            `TREASURY_FUNDING:${sourceWallet.walletId}`,
+            `${contra.accountPrefix}:${sourceWallet.walletId}`,
             sourceWallet.balance,
             fundingSourceBalance,
+            contra.category,
+            contra.creditDescription,
+            contra.debitDescription,
           ],
         );
       }
@@ -677,6 +732,7 @@ export class AdminOperationsService {
             valueDate: request.value_date,
             evidenceReference: request.evidence_reference,
             businessPurpose: request.business_purpose,
+            fundingClassification: request.funding_classification,
           }),
           actor,
           request.reference,
@@ -689,6 +745,7 @@ export class AdminOperationsService {
         fundingType: request.funding_type,
         direction,
         businessPurpose: request.business_purpose,
+        fundingClassification: request.funding_classification,
         reference: request.reference,
         amount: request.amount,
         wallet: { ...funded, balance: fundedBalance },

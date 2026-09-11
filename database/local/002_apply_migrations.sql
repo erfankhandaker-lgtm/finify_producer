@@ -101,6 +101,30 @@ CREATE TABLE public.finify_schema_migrations (
 \ir /migrations/042_mr_finify_secure_configuration.sql
 \echo Applying 043_customer_kyc_profile_sync.sql
 \ir /migrations/043_customer_kyc_profile_sync.sql
+\echo Applying 044_treasury_funding_classification.sql
+\ir /migrations/044_treasury_funding_classification.sql
+\echo Applying 045_configurable_onboarding_engine.sql
+\ir /migrations/045_configurable_onboarding_engine.sql
+\echo Applying 046_onboarding_runtime_progression.sql
+\ir /migrations/046_onboarding_runtime_progression.sql
+\echo Applying 047_fix_onboarding_runtime_customer_activation.sql
+\ir /migrations/047_fix_onboarding_runtime_customer_activation.sql
+\echo Applying 048_governed_onboarding_channels.sql
+\ir /migrations/048_governed_onboarding_channels.sql
+\echo Applying 049_default_customer_onboarding_journey.sql
+\ir /migrations/049_default_customer_onboarding_journey.sql
+\echo Applying 050_onboarding_configuration_bindings.sql
+\ir /migrations/050_onboarding_configuration_bindings.sql
+\echo Applying 051_onboarding_verified_runtime.sql
+\ir /migrations/051_onboarding_verified_runtime.sql
+\echo Applying 052_governed_credit_processing.sql
+\ir /migrations/052_governed_credit_processing.sql
+\echo Applying 053_bank_type_merchants.sql
+\ir /migrations/053_bank_type_merchants.sql
+\echo Applying 054_bank_merchant_wallet_type.sql
+\ir /migrations/054_bank_merchant_wallet_type.sql
+\echo Applying 055_credit_commercial_configuration_studio.sql
+\ir /migrations/055_credit_commercial_configuration_studio.sql
 
 INSERT INTO public.finify_schema_migrations(version,name)
 SELECT lpad(version::text,3,'0'),
@@ -124,6 +148,12 @@ SELECT lpad(version::text,3,'0'),
          '037_admin_biometric_login.sql','038_admin_totp_mfa.sql',
          '039_admin_security_configuration.sql','040_eod_business_close_schedule.sql',
          '041_mr_finify_assistant.sql','042_mr_finify_secure_configuration.sql',
-         '043_customer_kyc_profile_sync.sql'
+         '043_customer_kyc_profile_sync.sql','044_treasury_funding_classification.sql',
+         '045_configurable_onboarding_engine.sql','046_onboarding_runtime_progression.sql',
+         '047_fix_onboarding_runtime_customer_activation.sql','048_governed_onboarding_channels.sql',
+         '049_default_customer_onboarding_journey.sql','050_onboarding_configuration_bindings.sql',
+         '051_onboarding_verified_runtime.sql','052_governed_credit_processing.sql',
+         '053_bank_type_merchants.sql','054_bank_merchant_wallet_type.sql',
+         '055_credit_commercial_configuration_studio.sql'
        ])[version]
-FROM generate_series(1,43) AS version;
+FROM generate_series(1,55) AS version;

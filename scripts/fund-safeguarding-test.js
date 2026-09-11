@@ -35,6 +35,7 @@ async function main() {
       }, 'SAFEGUARDING_TEST_MAKER');
       const request = await operations.createTreasuryFunding({
         operation: 'ADD_SAFEGUARDING',
+        fundingClassification: 'OWNER_INVESTMENT',
         currency,
         amount: '100000.00',
         reference,

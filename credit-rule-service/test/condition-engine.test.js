@@ -49,6 +49,20 @@ test('coerces booleans and dates consistently', () => {
   );
 });
 
+test('evaluates mixed decision-input fields with leaf-specific data types', () => {
+  const engine = new ConditionEngineService();
+  const condition = {
+    all: [
+      { field: 'grade', dataType: 'STRING', operator: 'IN', values: ['A', 'B', 'C'] },
+      { field: 'dominantCashFlow', dataType: 'DECIMAL', operator: 'GREATER_THAN', value: 300000 },
+      { field: 'kycVerified', dataType: 'BOOLEAN', operator: 'EQUALS', value: true }
+    ]
+  };
+  engine.validate(condition);
+  assert.equal(engine.evaluate(condition, { grade: 'A', dominantCashFlow: 400000, kycVerified: true }, 'STRING'), true);
+  assert.equal(engine.evaluate(condition, { grade: 'D', dominantCashFlow: 400000, kycVerified: true }, 'STRING'), false);
+});
+
 test('rejects invalid condition and action definitions', () => {
   const engine = new ConditionEngineService();
   assert.throws(

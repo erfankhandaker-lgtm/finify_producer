@@ -258,6 +258,7 @@ export class KycService {
         ],
       );
       await this.audit(client, id, input.action, locked.rows[0].status, status, input.reason.trim(), actor);
+      await client.query('SELECT onboarding.propagate_kyc_decision($1::uuid,$2)', [id, actor]);
       await client.query('COMMIT');
       return this.get(id);
     } catch (error) {

@@ -1,4 +1,4 @@
-export type SourceType = 'AI_RESULT' | 'POSTGRES' | 'HTTP_API';
+export type SourceType = 'AI_RESULT' | 'DECISION_INPUT' | 'POSTGRES' | 'HTTP_API';
 export type DataType = 'STRING' | 'DECIMAL' | 'INTEGER' | 'BOOLEAN' | 'DATE' | 'DATETIME';
 export type ReadMode = 'SINGLE' | 'LATEST' | 'SUM' | 'AVERAGE' | 'COUNT' | 'MINIMUM' | 'MAXIMUM' | 'EXISTS';
 export type DecisionOutcome =
@@ -12,6 +12,8 @@ export type DecisionOutcome =
   | 'DATA_SOURCE_UNAVAILABLE';
 
 export interface ConditionLeaf {
+  field?: string;
+  dataType?: DataType;
   operator:
     | 'EQUALS'
     | 'NOT_EQUALS'
@@ -52,7 +54,8 @@ export type RuleActionType =
   | 'SUBTRACT_LIMIT_FIXED'
   | 'CAP_LIMIT_FIXED'
   | 'CAP_LIMIT_FROM_VALUE_MULTIPLIER'
-  | 'SET_CREDIT_OFFER';
+  | 'SET_CREDIT_OFFER'
+  | 'SET_LIMIT_FROM_INPUT_MULTIPLIER';
 
 export interface RuleAction {
   type: RuleActionType;
@@ -62,6 +65,9 @@ export interface RuleAction {
   repaymentOptionIds?: string[];
   reasonCode?: string;
   reasonMessage?: string;
+  inputField?: string;
+  floor?: number;
+  cap?: number;
 }
 
 export interface HttpIntegrationRow {
@@ -95,6 +101,7 @@ export interface ScoreProviderRow {
   validity_minutes: number;
   is_default: boolean;
   is_active: boolean;
+  provider_mode?: 'HTTP' | 'SUBMITTED';
 }
 
 export interface MasterRuleRow {
@@ -173,4 +180,5 @@ export interface EvaluationContext {
   reasonCodes: string[];
   repaymentOptionIds: string[];
   matchedExclusiveGroups: Set<string>;
+  decisionInputs: Record<string, unknown>;
 }

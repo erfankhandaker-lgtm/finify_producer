@@ -1,0 +1,167 @@
+name: Finify CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  producer:
+    name: Producer API
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run build
+      - run: npm test -- --runInBand
+      - run: npm run test:transaction-security
+
+  node-services:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Accounting service
+            directory: accounting-service
+          - name: Transaction consumer
+            directory: consumer-service
+          - name: Credit-rule service
+            directory: credit-rule-service
+          - name: KYC service
+            directory: kyc-service
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  mock-merchant:
+    name: Mock merchant contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm test
+        working-directory: mock-merchant-service
+
+  web-apps:
+    name: ${{ matrix.name }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Admin UI
+            directory: admin-ui
+          - name: Customer portal
+            directory: portal-ui
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    env:
+      NEXT_PUBLIC_API_URL: http://localhost:8080/finify
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: 1x00000000000000000000AA
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ matrix.directory }}/package-lock.json
+      - run: npm ci
+      - run: npm run lint -- --max-warnings=0
+      - run: npm run build
+
+  kyc-ocr:
+    name: KYC OCR syntax
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m py_compile kyc-ocr-service/main.py
+
+  migrations:
+    name: Database migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: finify
+          POSTGRES_PASSWORD: finify_ci_password
+          POSTGRES_DB: finify
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finify -d finify"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      MIGRATION_DATABASE_URL: postgresql://finify:finify_ci_password@127.0.0.1:5432/finify
+      PGPASSWORD: finify_ci_password
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Create legacy baseline
+        run: psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f database/local/001_legacy_baseline.sql
+      - name: Apply and re-check migrations
+        run: |
+          npm run migrate
+          npm run migrate
+      - name: Run migration verification scripts
+        run: |
+          for file in database/migrations/*.verify.sql; do
+            psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$file"
+          done
+
+  compose:
+    name: Compose validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FINIFY_IMAGE_REGISTRY: ghcr.io/example/finify
+      FINIFY_IMAGE_TAG: ci
+      ADMIN_SITE_URL: https://admin.example.test
+      PORTAL_SITE_URL: https://portal.example.test
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -f compose.yaml -f compose.local.yaml config --quiet
+      - run: docker compose -f compose.yaml -f compose.prod.yaml config --quiet

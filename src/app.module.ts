@@ -18,6 +18,8 @@ import { WalletModule } from './modules/wallets/wallet.module';
 import { AdminOperationsModule } from './modules/admin-operations/admin-operations.module';
 import { PortalModule } from './modules/portal/portal.module';
 import { MrFinifyModule } from './modules/mr-finify/mr-finify.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { CreditCommercialModule } from './modules/credit-commercial/credit-commercial.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { MrFinifyModule } from './modules/mr-finify/mr-finify.module';
     AdminOperationsModule,
     MrFinifyModule,
     PortalModule,
+    OnboardingModule,
+    CreditCommercialModule,
   ],
   controllers: [
     AppController,

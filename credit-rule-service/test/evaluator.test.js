@@ -34,6 +34,11 @@ function makeHarness(rules, sourceValues = {}) {
       if (text.includes('FROM public.credit_score_providers')) return [];
       if (text.includes('FROM public.credit_master_rules WHERE')) return [master];
       if (text.includes('FROM public.credit_rules') && text.includes('ORDER BY priority,id')) return rules;
+      if (text.includes('FROM public.credit_product_bindings binding') && text.includes('JOIN public.credit_lenders')) {
+        return [{ id: 'active-commercial-binding' }];
+      }
+      if (text.includes('FROM public.credit_product_bindings binding') && text.includes('LEFT JOIN public.credit_lenders')) return [];
+      if (text.includes('FROM public.credit_reason_catalogue catalogue')) return [];
       if (text.includes('INSERT INTO public.credit_rule_execution_steps')) {
         state.steps.push({
           ruleId: params[1],
@@ -123,6 +128,7 @@ const request = {
   existingExposure: 100,
   pendingReservations: 0,
   aiResult: { score: 720, category: 'PRIME' },
+  decisionInputs: { grade: 'PRIME', countryCode: 'GBR', channel: 'APP' },
   forceRescore: false,
   simulation: false
 };

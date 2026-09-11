@@ -54,6 +54,8 @@ partially secured state.
 - `/finify/admin/reference-data/*`
 - `/finify/admin/wallets/*`
 - `/finify/admin/assistant/*`
+- `/finify/api/v1/admin/onboarding/*`
+- `/finify/api/v1/onboarding/*`
 - `/finify/portal/*`
 - `/finify/wallets/*`
 - `POST /v1/merchant-confirmations`

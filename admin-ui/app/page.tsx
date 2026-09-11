@@ -8,7 +8,6 @@ import {
   Bell,
   BookOpen,
   CalendarDays,
-  Camera,
   Check,
   CheckCircle2,
   ChevronRight,
@@ -34,7 +33,6 @@ import {
   Plus,
   ReceiptText,
   Search,
-  ScanFace,
   Server,
   Settings,
   ShieldAlert,
@@ -52,6 +50,7 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
+import Image from 'next/image';
 import PricingFlowWorkspace from '../features/pricing-flow/PricingFlowWorkspace';
 import type { PricingAdminRequest } from '../features/pricing-flow/PricingFlowWorkspace';
 import type { PricingFlowRecord } from '../features/pricing-flow/model';
@@ -64,6 +63,12 @@ import type {
 import ReferenceDataWorkspace from '../features/reference-data/ReferenceDataWorkspace';
 import type { ReferenceDataRequest } from '../features/reference-data/ReferenceDataWorkspace';
 import KycWorkspace from '../features/kyc/KycWorkspace';
+import OnboardingJourneyWorkspace from '../features/onboarding-journey/OnboardingJourneyWorkspace';
+import type { OnboardingAdminRequest } from '../features/onboarding-journey/OnboardingJourneyWorkspace';
+import OnboardingChannelWorkspace from '../features/onboarding-channel/OnboardingChannelWorkspace';
+import type { ChannelAdminRequest } from '../features/onboarding-channel/OnboardingChannelWorkspace';
+import CreditCommercialWorkspace from '../features/credit-commercial/CreditCommercialWorkspace';
+import type { CreditCommercialRequest } from '../features/credit-commercial/CreditCommercialWorkspace';
 import { sessionFetch } from '../lib/session';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5002/finify';
@@ -180,11 +185,17 @@ type CommandCenterMetrics = {
   pendingReviews: { total: number; referenceData: number; pricingFlows: number; treasuryFunding: number; kyc: number };
 };
 
+type TreasuryFundingClassification =
+  | 'OWNER_INVESTMENT'
+  | 'CUSTOMER_FUNDS'
+  | 'BANK_PREFUNDING';
+
 type TreasuryFundingRequest = {
   id: string;
   fundingType: 'SAFEGUARDING' | 'COMMISSION_FUNDING' | 'CHARGE_REVENUE';
   direction: 'CREDIT' | 'DEBIT';
   businessPurpose: 'SAFEGUARDING_FUNDING' | 'COMMISSION_FUNDING' | 'SAFEGUARDING_WITHDRAWAL' | 'GROSS_PROFIT_WITHDRAWAL';
+  fundingClassification: TreasuryFundingClassification | 'NOT_APPLICABLE';
   walletId: string;
   walletCode: number;
   walletName: string;
@@ -360,6 +371,8 @@ const navigation = [
       { id: 'command', label: 'Command center', icon: LayoutDashboard },
       { id: 'pulse', label: 'System pulse', icon: Activity },
       { id: 'customers', label: 'Customer management', icon: Users },
+      { id: 'onboarding', label: 'Onboarding journeys', icon: Workflow, required: ['onboarding_journeys.read'] },
+      { id: 'onboarding-channels', label: 'Onboarding channels', icon: Network, required: ['onboarding_channels.read'] },
       { id: 'transactions', label: 'Transactions', icon: ReceiptText },
       { id: 'kyc', label: 'KYC & identity', icon: Fingerprint, required: ['kyc.read'] },
     ],
@@ -368,7 +381,7 @@ const navigation = [
     label: 'CREDIT',
     items: [
       { id: 'credit', label: 'Decision engine', icon: Workflow, signal: true },
-      { id: 'loans', label: 'Loan products', icon: CircleDollarSign },
+      { id: 'loans', label: 'Lending commercial', icon: CircleDollarSign, required: ['credit_commercial.read'] },
       { id: 'collections', label: 'EMI & collections', icon: Clock3 },
       { id: 'funders', label: 'Funders & banks', icon: Landmark },
     ],
@@ -430,6 +443,7 @@ function unwrap<T>(raw: unknown): T {
 }
 
 async function authenticatedFetch<T>(route: string, token: string): Promise<T> {
+  void token;
   const response = await sessionFetch(`${API_URL}${route}`, {
     cache: 'no-store',
   });
@@ -440,14 +454,16 @@ async function authenticatedFetch<T>(route: string, token: string): Promise<T> {
 async function adminRequest<T>(
   route: string,
   token: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; headers?: Record<string,string> } = {},
 ): Promise<T> {
+  void token;
   const response = await sessionFetch(`${API_URL}${route}`, {
     method: init.method || 'GET',
     cache: 'no-store',
     headers: {
       accept: 'application/json',
       ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+      ...(init.headers || {}),
     },
     body: init.body === undefined ? undefined : JSON.stringify(init.body),
   });
@@ -705,7 +721,7 @@ function LoginExperience({
             />
             {captchaSettings.enabled && <TurnstileChallenge key={`${captchaKey}-${captchaSettings.siteKey}`} siteKey={captchaSettings.siteKey} onVerify={setCaptchaToken} />}
           </>}
-          {step === 'enroll' && <div className="mfa-enrollment"><img src={qrCode} alt="Authenticator QR code" /><span>MANUAL SETUP KEY</span><code>{manualKey}</code></div>}
+          {step === 'enroll' && <div className="mfa-enrollment"><Image src={qrCode} width={180} height={180} unoptimized alt="Authenticator QR code" /><span>MANUAL SETUP KEY</span><code>{manualKey}</code></div>}
           {(step === 'enroll' || step === 'totp') && <DarkField label="Authenticator code" value={code} placeholder="000000" onChange={(value) => setCode(value.replace(/\D/g, '').slice(0, 6))} icon={<ShieldCheck />} autoComplete="one-time-code" />}
           {step === 'recover' && <DarkField label="Recovery PIN" value={recoveryPin} placeholder="0000-0000-0000" onChange={setRecoveryPin} icon={<KeyRound />} autoComplete="off" />}
           {step === 'recovery-pin' && <div className="recovery-pin-card"><span>ONE-TIME RECOVERY PIN</span><strong>{recoveryPin}</strong><button type="button" onClick={() => void navigator.clipboard.writeText(recoveryPin)}>COPY PIN</button><p>Using it will require you to scan a new authenticator QR code. The old PIN will immediately become invalid.</p></div>}
@@ -735,8 +751,10 @@ function TurnstileChallenge({ siteKey, onVerify }: { siteKey: string; onVerify: 
   const target = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let widgetId: string | undefined;
+    type TurnstileApi = { render: (target: HTMLElement, options: Record<string, unknown>) => string; remove: (id: string) => void };
+    const turnstileApi = () => (window as unknown as { turnstile?: TurnstileApi }).turnstile;
     const render = () => {
-      const turnstile = (window as unknown as { turnstile?: { render: (target: HTMLElement, options: Record<string, unknown>) => string; remove: (id: string) => void } }).turnstile;
+      const turnstile = turnstileApi();
       if (!turnstile || !target.current) return;
       widgetId = turnstile.render(target.current, {
         sitekey: siteKey,
@@ -744,11 +762,11 @@ function TurnstileChallenge({ siteKey, onVerify }: { siteKey: string; onVerify: 
       });
     };
     const existing = document.querySelector<HTMLScriptElement>('script[data-finify-turnstile]');
-    if (existing) { if ((window as any).turnstile) render(); else existing.addEventListener('load', render, { once: true }); }
+    if (existing) { if (turnstileApi()) render(); else existing.addEventListener('load', render, { once: true }); }
     else {
       const script = document.createElement('script'); script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; script.async = true; script.defer = true; script.dataset.finifyTurnstile = 'true'; script.addEventListener('load', render, { once: true }); document.head.appendChild(script);
     }
-    return () => { const turnstile = (window as any).turnstile; if (widgetId && turnstile) turnstile.remove(widgetId); };
+    return () => { const turnstile = turnstileApi(); if (widgetId && turnstile) turnstile.remove(widgetId); };
   }, [onVerify, siteKey]);
   return <div className="turnstile-frame"><div ref={target} /></div>;
 }
@@ -955,7 +973,6 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
   const [assistantOpen, setAssistantOpen] = useState(false);
   const [profile, setProfile] = useState<AdminProfile>({});
   const [metrics, setMetrics] = useState<CommandCenterMetrics | null>(null);
-  const [loading, setLoading] = useState(true);
   const [pulseRefreshing, setPulseRefreshing] = useState(false);
   const [pulseCheckedAt, setPulseCheckedAt] = useState('');
   const [pulseError, setPulseError] = useState('');
@@ -1013,7 +1030,6 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
       }
       if (profileResult.status === 'fulfilled') setProfile(profileResult.value);
       if (metricsResult.status === 'fulfilled') setMetrics(metricsResult.value);
-      setLoading(false);
     });
     return () => {
       activeRequest = false;
@@ -1154,7 +1170,6 @@ function CommandCenter({ token, onExpired }: { token: string; onExpired: () => v
               pulseCheckedAt={pulseCheckedAt}
               pulseError={pulseError}
               onRefreshPulse={() => void refreshSystemPulse()}
-              loading={loading}
               openModule={setActive}
             />
           ) : active === 'pulse' ? (
@@ -1468,7 +1483,6 @@ function Dashboard({
   pulseCheckedAt,
   pulseError,
   onRefreshPulse,
-  loading,
   openModule,
 }: {
   token: string;
@@ -1479,7 +1493,6 @@ function Dashboard({
   pulseCheckedAt: string;
   pulseError: string;
   onRefreshPulse: () => void;
-  loading: boolean;
   openModule: (id: string) => void;
 }) {
   const operational = services.filter((service) => service.state === 'operational').length;
@@ -1516,6 +1529,7 @@ function Dashboard({
     | 'WITHDRAW_CHARGE_REVENUE';
   const [fundingForm, setFundingForm] = useState({
     operation: 'ADD_SAFEGUARDING' as TreasuryOperation,
+    fundingClassification: '' as TreasuryFundingClassification | 'NOT_APPLICABLE' | '',
     currency: 'GBP',
     amount: '',
     reference: '',
@@ -1541,6 +1555,7 @@ function Dashboard({
     const currencies = fundingCurrencies(operation);
     setFundingForm({
       operation,
+      fundingClassification: '',
       currency: currencies[0] || 'GBP',
       amount: '',
       reference: '',
@@ -1553,6 +1568,18 @@ function Dashboard({
     setFundingMessage('');
     setFundingOpen(true);
   };
+  const isSafeguardingMovement = fundingForm.operation === 'ADD_SAFEGUARDING'
+    || fundingForm.operation === 'WITHDRAW_SAFEGUARDING';
+  const fundingClassificationLabels: Record<TreasuryFundingClassification, string> = {
+    OWNER_INVESTMENT: 'Owner investment / paid-in capital',
+    CUSTOMER_FUNDS: 'Customer safeguarded funds',
+    BANK_PREFUNDING: 'Bank or partner prefunding',
+  };
+  const selectedContraLabel = isSafeguardingMovement && fundingForm.fundingClassification
+    && fundingForm.fundingClassification !== 'NOT_APPLICABLE'
+    ? fundingClassificationLabels[fundingForm.fundingClassification]
+    : '';
+  const isSafeguardingDeposit = fundingForm.operation === 'ADD_SAFEGUARDING';
   const submitFunding = async () => {
     if (!fundingFile) {
       setFundingMessage('Upload the bank transaction document before submitting.');
@@ -1778,22 +1805,51 @@ function Dashboard({
             <label>MOVEMENT TYPE<select value={fundingForm.operation} onChange={(event) => {
               const operation = event.target.value as TreasuryOperation;
               const currencies = fundingCurrencies(operation);
-              setFundingForm({ ...fundingForm, operation, currency: currencies[0] || '' });
+              setFundingForm({
+                ...fundingForm,
+                operation,
+                currency: currencies[0] || '',
+                fundingClassification:
+                  operation === 'ADD_SAFEGUARDING' || operation === 'WITHDRAW_SAFEGUARDING'
+                    ? ''
+                    : 'NOT_APPLICABLE',
+              });
             }}>
               <option value="ADD_SAFEGUARDING">Bank deposit → Safeguarding</option>
               <option value="ADD_COMMISSION_FUNDING">Bank deposit → Commission funding</option>
               <option value="WITHDRAW_SAFEGUARDING">Bank withdrawal ← Safeguarding</option>
               <option value="WITHDRAW_CHARGE_REVENUE">Gross profit withdrawal ← Charge collection</option>
             </select></label>
+            {isSafeguardingMovement && <label>FUNDING SOURCE / ACCOUNTING CLASSIFICATION
+              <select
+                value={fundingForm.fundingClassification}
+                onChange={(event) => setFundingForm({
+                  ...fundingForm,
+                  fundingClassification: event.target.value as TreasuryFundingClassification | '',
+                })}
+              >
+                <option value="">Select the economic source</option>
+                <option value="OWNER_INVESTMENT">Owner investment — Equity</option>
+                <option value="CUSTOMER_FUNDS">Customer funds — Safeguarded liability</option>
+                <option value="BANK_PREFUNDING">Bank / partner prefunding — Liability</option>
+              </select>
+              <small>This classification is immutable after submission and determines the balancing GL account.</small>
+            </label>}
             <label>CURRENCY<select value={fundingForm.currency} onChange={(event) => setFundingForm({ ...fundingForm, currency: event.target.value })}>{fundingCurrencies(fundingForm.operation).map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></label>
             <label>AMOUNT<input inputMode="decimal" placeholder="0.00" value={fundingForm.amount} onChange={(event) => setFundingForm({ ...fundingForm, amount: event.target.value.replace(/[^0-9.]/g, '') })} /></label>
+            {isSafeguardingMovement && selectedContraLabel && <div className="treasury-journal-preview">
+              <div><span>ACCOUNTING PREVIEW</span><strong>Balanced journal on checker approval</strong></div>
+              <div className="treasury-journal-line"><b>DR</b><span>{isSafeguardingDeposit ? 'Safeguarding bank asset' : selectedContraLabel}</span><strong>{fundingForm.amount ? formatMoney(fundingForm.amount, fundingForm.currency || 'GBP') : '—'}</strong></div>
+              <div className="treasury-journal-line"><b>CR</b><span>{isSafeguardingDeposit ? selectedContraLabel : 'Safeguarding bank asset'}</span><strong>{fundingForm.amount ? formatMoney(fundingForm.amount, fundingForm.currency || 'GBP') : '—'}</strong></div>
+              <small>{fundingForm.fundingClassification === 'OWNER_INVESTMENT' ? 'Balance-sheet equity; no P&L impact.' : 'Balance-sheet liability; no P&L impact.'}</small>
+            </div>}
             <label>BANK NAME<input placeholder="Bank name" value={fundingForm.bankName} onChange={(event) => setFundingForm({ ...fundingForm, bankName: event.target.value })} /></label>
             <label>BANK ACCOUNT / IBAN<input placeholder="Source or beneficiary account" value={fundingForm.bankAccount} onChange={(event) => setFundingForm({ ...fundingForm, bankAccount: event.target.value })} /></label>
             <label>BANK TRANSACTION REFERENCE<input placeholder="BANK-2026-001" value={fundingForm.reference} onChange={(event) => setFundingForm({ ...fundingForm, reference: event.target.value.toUpperCase().replace(/[^A-Z0-9._/-]/g, '') })} /></label>
             <div className="themed-date-field"><span>VALUE DATE</span><ThemedDatePicker value={fundingForm.valueDate} onChange={(value) => setFundingForm({ ...fundingForm, valueDate: value })} placeholder="Select value date" contextLabel="VALUE DATE / BANK SETTLEMENT" /></div>
             <label>BANK TRANSACTION DOCUMENT<input type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" onChange={(event) => setFundingFile(event.target.files?.[0] || null)} /><small>{fundingFile ? `${fundingFile.name} · ${(fundingFile.size / 1024 / 1024).toFixed(2)} MB` : 'PDF, PNG, or JPEG · maximum 10 MB · stored privately in MinIO'}</small></label>
             <label>MOVEMENT REASON<textarea rows={4} placeholder="State the source, beneficiary, and business reason" value={fundingForm.comment} onChange={(event) => setFundingForm({ ...fundingForm, comment: event.target.value })} /></label>
-            <button className="command-button" disabled={fundingSubmitting || !fundingForm.currency || !fundingFile} onClick={() => void submitFunding()}>{fundingSubmitting ? <LoaderCircle className="spin" /> : <ShieldCheck />} UPLOAD & SUBMIT FOR APPROVAL</button>
+            <button className="command-button" disabled={fundingSubmitting || !fundingForm.currency || !fundingFile || (isSafeguardingMovement && !fundingForm.fundingClassification)} onClick={() => void submitFunding()}>{fundingSubmitting ? <LoaderCircle className="spin" /> : <ShieldCheck />} UPLOAD & SUBMIT FOR APPROVAL</button>
           </div>
         </aside>
       </div>}
@@ -1882,7 +1938,7 @@ function SystemPulseWorkspace({
         </div>
       </div>
       <div className="pulse-domain-inventory">
-        {filteredDomains.map((domain) => <PulseDomainSection key={domain.id} domain={domain} />)}
+        {filteredDomains.map((domain) => <PulseDomainSection key={`${domain.id}:${domain.services.some((service) => service.state !== 'operational')}`} domain={domain} />)}
         {!filteredDomains.length && <div className="pulse-inventory-empty"><Search /><strong>No services match this view</strong><span>Clear the search or select another health filter.</span></div>}
       </div>
     </section>
@@ -1892,7 +1948,6 @@ function SystemPulseWorkspace({
 function PulseDomainSection({ domain }: { domain: PulseDomain }) {
   const hasAttention = domain.services.some((service) => service.state !== 'operational');
   const [open, setOpen] = useState(hasAttention);
-  useEffect(() => { if (hasAttention) setOpen(true); }, [hasAttention]);
   const operational = domain.services.filter((service) => service.state === 'operational').length;
   return (
     <section className={`pulse-domain-section panel ${hasAttention ? 'attention' : ''}`}>
@@ -1942,7 +1997,10 @@ function ModuleWorkspace({
   if (moduleId === 'wallets') return <CustomerWorkspace token={token} onExpired={onExpired} />;
   if (moduleId === 'transactions') return <TransactionsWorkspace token={token} onExpired={onExpired} />;
   if (moduleId === 'kyc') return <KycWorkspace token={token} profile={profile} />;
+  if (moduleId === 'onboarding') return <OnboardingJourneyExperience token={token} profile={profile} />;
+  if (moduleId === 'onboarding-channels') return <OnboardingChannelExperience token={token} profile={profile} />;
   if (moduleId === 'credit') return <CreditWorkspace token={token} />;
+  if (moduleId === 'loans') return <CreditCommercialExperience token={token} profile={profile} />;
   if (moduleId === 'charges') {
     return <PricingFlowExperience token={token} profile={profile} initialFocus="charge" />;
   }
@@ -1982,6 +2040,30 @@ function ModuleWorkspace({
       </div>
     </section>
   );
+}
+
+function OnboardingJourneyExperience({ token,profile }:{ token:string;profile:AdminProfile }) {
+  const request:OnboardingAdminRequest=useCallback(
+    async <T,>(route:string,init?:{ method?:string;body?:unknown;headers?:Record<string,string> }):Promise<T>=>
+      adminRequest<T>(route,token,init),[token],
+  );
+  return <OnboardingJourneyWorkspace request={request} profile={profile}/>;
+}
+
+function OnboardingChannelExperience({token,profile}:{token:string;profile:AdminProfile}) {
+  const request:ChannelAdminRequest=useCallback(
+    async <T,>(route:string,init?:{method?:string;body?:unknown;headers?:Record<string,string>}):Promise<T>=>
+      adminRequest<T>(route,token,init),[token],
+  );
+  return <OnboardingChannelWorkspace request={request} profile={profile}/>;
+}
+
+function CreditCommercialExperience({token,profile}:{token:string;profile:AdminProfile}) {
+  const request: CreditCommercialRequest = useCallback(
+    async <T,>(route:string,init?:{method?:string;body?:unknown}):Promise<T> =>
+      adminRequest<T>(route,token,init),[token],
+  );
+  return <CreditCommercialWorkspace request={request} profile={profile}/>;
 }
 
 function PricingFlowExperience({
@@ -2101,7 +2183,11 @@ function MrFinifyConfiguration({ token, profile }: { token: string; profile: Adm
     finally { setLoading(false); }
   }, [token]);
 
-  useEffect(() => { if (canManage) void load(); else setLoading(false); }, [canManage, load]);
+  useEffect(() => {
+    if (!canManage) return;
+    const pendingLoad = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(pendingLoad);
+  }, [canManage, load]);
 
   const save = async (removeApiKey = false) => {
     setSaving(true); setError(''); setMessage('');
@@ -2190,7 +2276,11 @@ function SecurityConfiguration({ token, profile }: { token: string; profile: Adm
     finally { setLoading(false); }
   }, [token]);
 
-  useEffect(() => { if (canManage) void load(); else setLoading(false); }, [canManage, load]);
+  useEffect(() => {
+    if (!canManage) return;
+    const pendingLoad = window.setTimeout(() => void load(), 0);
+    return () => window.clearTimeout(pendingLoad);
+  }, [canManage, load]);
 
   const save = async () => {
     setSaving(true); setError(''); setMessage('');
@@ -3616,7 +3706,7 @@ function AccountingWorkspace({ token, profile }: { token: string; profile: Admin
             <label>CHECKER USERNAME<input placeholder="Different administrator" value={currencyForm.approvedBy} onChange={(event) => setCurrencyForm({ ...currencyForm, approvedBy: event.target.value })} /></label>
           </div>
           <div className="currency-wallet-preview">
-            {[['105', 'TEMPORARY RESERVE'], ['110', 'SAFEGUARDING'], ['113', 'CHARGE REVENUE'], ['114', 'COMMISSION FUNDING'], ['115', 'TREASURY FUNDING SOURCE']].map(([code, name]) => <div key={code}><span>{code}</span><strong>{name}</strong><small>ZERO OPENING BALANCE</small></div>)}
+            {[['105', 'TEMPORARY RESERVE'], ['110', 'SAFEGUARDING'], ['113', 'CHARGE REVENUE'], ['114', 'COMMISSION FUNDING'], ['115', 'BANK PREFUNDING'], ['116', 'OWNER CAPITAL'], ['117', 'CUSTOMER FUNDS LIABILITY']].map(([code, name]) => <div key={code}><span>{code}</span><strong>{name}</strong><small>ZERO OPENING BALANCE</small></div>)}
           </div>
           <div className="row-actions"><button onClick={() => setCurrencyFormOpen(false)}>CANCEL</button><button className="command-button" disabled={currencySubmitting || currencyForm.currency.length !== 3 || currencyForm.approvedBy.trim().length < 2 || currencyForm.approvedBy.trim().toLowerCase() === String(profile.username || '').trim().toLowerCase()} onClick={() => void provisionCurrency()}>{currencySubmitting ? <LoaderCircle className="spin" /> : <Check />} PROVISION CURRENCY</button></div>
         </div>}
@@ -3935,7 +4025,7 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
   };
   const reviewIsMaker = reviewRequest?.maker.trim().toLowerCase() ===
     String(profile.username || '').trim().toLowerCase();
-  const ApprovalReviewContent = ({ request, onDownloadEvidence }: { request: ApprovalQueueItem; onDownloadEvidence: () => void }) => {
+  const renderApprovalReviewContent = (request: ApprovalQueueItem, onDownloadEvidence: () => void) => {
     const details = request.details;
     if (request.kind === 'reference-data') {
       const before = request.baseSnapshot || {};
@@ -3950,13 +4040,13 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
       </div>;
     }
     if (request.kind === 'pricing-flow') {
-      const definition = (details.definition || {}) as Record<string, any>;
-      const trigger = (definition.trigger || {}) as Record<string, any>;
-      const route = (definition.route || {}) as Record<string, any>;
-      const condition = (definition.condition || {}) as Record<string, any>;
-      const charge = (definition.charge || {}) as Record<string, any>;
-      const commission = (definition.commission || {}) as Record<string, any>;
-      const settlement = (definition.settlement || {}) as Record<string, any>;
+      const definition = (details.definition || {}) as Record<string, unknown>;
+      const trigger = (definition.trigger || {}) as Record<string, unknown>;
+      const route = (definition.route || {}) as Record<string, unknown>;
+      const condition = (definition.condition || {}) as Record<string, unknown>;
+      const charge = (definition.charge || {}) as Record<string, unknown>;
+      const commission = (definition.commission || {}) as Record<string, unknown>;
+      const settlement = (definition.settlement || {}) as Record<string, unknown>;
       return <div className="approval-evidence">
         <div className="approval-section-head"><div><span>PRICING DEFINITION</span><strong>Complete charge and commission flow</strong></div><small>{String(details.currency || trigger.currency || '—')}</small></div>
         <div className="drawer-grid approval-data-grid">
@@ -3980,6 +4070,7 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
         <div className="approval-section-head"><div><span>TREASURY EVIDENCE</span><strong>Bank movement and destination account</strong></div><small>{String(details.direction || '')}</small></div>
         <div className="drawer-grid approval-data-grid">
           <DataPoint label="MOVEMENT" value={String(details.businessPurpose || request.resource).replaceAll('_', ' ')} />
+          <DataPoint label="ACCOUNTING CLASSIFICATION" value={String(details.fundingClassification || 'NOT_APPLICABLE').replaceAll('_', ' ')} />
           <DataPoint label="AMOUNT" value={formatMoney(String(details.amount || 0), String(details.currency || 'GBP'))} />
           <DataPoint label="FINIFY WALLET" value={`${String(details.walletName || '—')} · ${String(details.walletId || '—')}`} />
           <DataPoint label="WALLET CODE / CURRENCY" value={`${String(details.walletCode || '—')} · ${String(details.currency || '—')}`} />
@@ -3989,6 +4080,10 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
           <DataPoint label="VALUE DATE" value={String(details.valueDate || '—').slice(0, 10)} />
           <DataPoint label="EVIDENCE REFERENCE" value={String(details.evidenceReference || '—')} />
           <DataPoint label="DOCUMENT" value={String(details.evidenceDocumentName || 'Not attached')} />
+          {String(details.fundingType) === 'SAFEGUARDING' && <DataPoint
+            label="JOURNAL IMPACT"
+            value={`${String(details.direction) === 'DEBIT' ? 'Dr classification / Cr safeguarding asset' : 'Dr safeguarding asset / Cr classification'} · no P&L impact`}
+          />}
         </div>
         {request.evidenceDocumentId && <button className="approval-document-button" onClick={onDownloadEvidence}><ReceiptText /> DOWNLOAD AND INSPECT BANK DOCUMENT</button>}
       </div>;
@@ -4045,7 +4140,7 @@ function ApprovalWorkspace({ token, profile }: { token: string; profile: AdminPr
             <strong>{reviewRequest.action}</strong>
             <small>Submitted {formatDate(reviewRequest.createdAt)} by {reviewRequest.maker}</small>
           </div>
-          {reviewLoading ? <div className="drawer-loading"><LoaderCircle className="spin" /> Loading the complete approval evidence…</div> : <ApprovalReviewContent request={reviewRequest} onDownloadEvidence={() => void downloadEvidence(reviewRequest)} />}
+          {reviewLoading ? <div className="drawer-loading"><LoaderCircle className="spin" /> Loading the complete approval evidence…</div> : renderApprovalReviewContent(reviewRequest, () => void downloadEvidence(reviewRequest))}
           <div className="approval-maker-note"><span>MAKER EXPLANATION</span><p>{reviewRequest.makerComment || 'No maker comment was provided.'}</p></div>
           {reviewIsMaker ? (
             <div className="treasury-warning"><ShieldCheck /> You created this request. A different checker must review and decide it.</div>
@@ -4092,29 +4187,6 @@ function NotificationPanel() {
       <div><span>SECURITY SIGNALS</span><strong>All clear</strong></div>
       <p><ShieldCheck /> No critical alerts or approval escalations require attention.</p>
       <button>OPEN SECURITY CENTER <ArrowRight /></button>
-    </div>
-  );
-}
-
-function WalletTable({ wallets, loading, expanded = false }: { wallets: WalletRow[]; loading: boolean; expanded?: boolean }) {
-  return (
-    <div className={`data-table-wrap ${expanded ? 'expanded' : ''}`}>
-      <table className="data-table">
-        <thead><tr><th>WALLET</th><th>TYPE</th><th>OWNER</th><th>BALANCE</th><th>STATE</th></tr></thead>
-        <tbody>
-          {loading && <tr><td colSpan={5}><span className="table-loading"><LoaderCircle className="spin" /> Synchronizing wallet registry…</span></td></tr>}
-          {!loading && !wallets.length && <tr><td colSpan={5}><span className="table-loading">No wallet records are available to this session.</span></td></tr>}
-          {!loading && wallets.map((wallet) => (
-            <tr key={wallet.walletId}>
-              <td><div className="wallet-identity"><span><WalletCards /></span><div><strong>{maskIdentifier(wallet.walletId)}</strong><small>{wallet.currency || '—'} / {wallet.isDefault ? 'DEFAULT' : 'ADDITIONAL'}</small></div></div></td>
-              <td><span className="table-code">{wallet.walletCode}</span> {wallet.walletName || wallet.purpose}</td>
-              <td>{maskIdentifier(wallet.ownerMsisdn)}</td>
-              <td className="numeric">{formatMoney(wallet.balance, wallet.currency)}</td>
-              <td><span className={`state-pill ${Number(wallet.status) === 0 ? 'active' : 'restricted'}`}><i />{Number(wallet.status) === 0 ? 'ACTIVE' : 'RESTRICTED'}</span></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }
@@ -4352,21 +4424,4 @@ function actionSummary(value: unknown) {
   if (!value || typeof value !== 'object') return 'CONTINUE';
   const action = value as Record<string, unknown>;
   return action.limit !== undefined ? `${String(action.limit)} LIMIT` : String(action.type || 'CONTINUE').split('_').join(' ');
-}
-
-function cameraAccessMessage(error: unknown) {
-  const name = error instanceof DOMException ? error.name : '';
-  if (name === 'SecurityError' || name === 'NotSupportedError') {
-    return 'Camera access requires HTTPS or http://localhost:3100. Open the admin portal using localhost, then try again.';
-  }
-  if (name === 'NotAllowedError') {
-    return 'Camera permission is blocked. Allow Camera for this site in the browser and in macOS System Settings → Privacy & Security → Camera, then retry.';
-  }
-  if (name === 'NotFoundError' || name === 'OverconstrainedError') {
-    return 'No compatible camera was detected. Connect or enable a camera, then retry.';
-  }
-  if (name === 'NotReadableError' || name === 'AbortError') {
-    return 'The camera is unavailable or already in use by another application. Close other camera apps and retry.';
-  }
-  return 'The camera could not be started. Check browser camera permission and retry.';
 }

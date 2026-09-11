@@ -31,6 +31,7 @@ function validateProductionConfiguration() {
     'CREDIT_RULE_ADMIN_API_KEY',
     'CREDIT_RULE_EVALUATION_API_KEY',
     'ADMIN_MFA_ENCRYPTION_KEY',
+    'ONBOARDING_PII_ENCRYPTION_KEY',
     'CORS_ALLOWED_ORIGINS',
   ];
   const missing = required.filter((key) => !String(process.env[key] || '').trim());

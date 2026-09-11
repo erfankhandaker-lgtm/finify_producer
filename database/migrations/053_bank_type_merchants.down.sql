@@ -1,0 +1,10 @@
+BEGIN;
+UPDATE public.credit_lenders SET status='DRAFT',merchant_id=NULL WHERE code='DTB_UGA';
+DELETE FROM public.credit_lenders WHERE code='DTB_UGA';
+UPDATE public.credit_lenders SET status='DRAFT' WHERE code='UNASSIGNED_UGA_LENDER';
+DELETE FROM public.business_merchants WHERE code='DTB';
+DELETE FROM public.business_merchant_types WHERE code='BANK';
+ALTER TABLE public.credit_lenders DROP COLUMN IF EXISTS merchant_id;
+DROP TABLE IF EXISTS public.business_merchants;
+DROP TABLE IF EXISTS public.business_merchant_types;
+COMMIT;

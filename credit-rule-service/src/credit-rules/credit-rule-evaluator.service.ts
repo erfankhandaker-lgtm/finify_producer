@@ -43,8 +43,8 @@ export class CreditRuleEvaluatorService {
     await this.dataSource.query(
       `INSERT INTO public.credit_rule_executions(
          id,customer_id,application_id,product_id,currency,requested_amount,
-         existing_exposure,pending_reservations,outcome,simulation
-       ) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,'PROCESSING',$9)`,
+         existing_exposure,pending_reservations,outcome,simulation,decision_inputs
+       ) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,'PROCESSING',$9,$10::jsonb)`,
       [
         executionId,
         dto.customerId,
@@ -54,7 +54,8 @@ export class CreditRuleEvaluatorService {
         dto.requestedAmount,
         dto.existingExposure,
         dto.pendingReservations,
-        dto.simulation
+        dto.simulation,
+        JSON.stringify(dto.decisionInputs)
       ]
     );
 
@@ -76,6 +77,11 @@ export class CreditRuleEvaluatorService {
          WHERE id=$1::uuid`,
         [executionId, score.snapshotId, score.result.score, score.result.category, Date.now() - startedAt]
       );
+      return this.getExecution(executionId);
+    }
+
+    if (dto.decisionInputs.grade !== score.result.category) {
+      await this.finishFailure(executionId, 'MANUAL_REVIEW', 'SCORE_GRADE_MISMATCH', startedAt);
       return this.getExecution(executionId);
     }
 
@@ -110,7 +116,8 @@ export class CreditRuleEvaluatorService {
       outcome: 'PROCESSING',
       reasonCodes: [],
       repaymentOptionIds: [...(master.default_repayment_option_ids ?? [])],
-      matchedExclusiveGroups: new Set()
+      matchedExclusiveGroups: new Set(),
+      decisionInputs: dto.decisionInputs as unknown as Record<string,unknown>
     };
 
     const rules = await this.dataSource.query<CreditRuleRow[]>(
@@ -186,6 +193,13 @@ export class CreditRuleEvaluatorService {
       }
     }
 
+
+    const commercial = await this.resolveCommercialBinding(dto);
+    if (['AUTO_APPROVED','COUNTER_OFFER'].includes(context.outcome) && !dto.simulation && !commercial) {
+      context.outcome = 'MANUAL_REVIEW';
+      context.reasonCodes.push('COMMERCIAL_BINDING_INACTIVE');
+    }
+
     await this.dataSource.query(
       `UPDATE public.credit_rule_executions SET
          allocated_limit=$2,available_limit=$3,eligible_repayment_option_ids=$4::jsonb,
@@ -235,7 +249,34 @@ export class CreditRuleEvaluatorService {
        WHERE step.execution_id=$1::uuid ORDER BY step.priority,step.id`,
       [id]
     );
-    return { ...rows[0], steps };
+    const reasons = await this.dataSource.query(
+      `SELECT catalogue.code,catalogue.decision_type AS "decisionType",
+              catalogue.customer_message AS "customerMessage",
+              catalogue.internal_reason AS "internalReason",
+              catalogue.analytics_dimension AS "analyticsDimension"
+       FROM public.credit_reason_catalogue catalogue
+       WHERE catalogue.is_active AND catalogue.code IN (
+         SELECT jsonb_array_elements_text($1::jsonb)
+       ) ORDER BY catalogue.code`,
+      [JSON.stringify(rows[0].reasonCodes ?? [])]
+    );
+    const commercialBindings = await this.dataSource.query(
+      `SELECT binding.code,binding.version,binding.status,binding.country_code AS "countryCode",
+              binding.currency,binding.channel,binding.wallet_type_code AS "walletTypeCode",
+              lender.code AS "lenderCode",lender.name AS "lenderName",
+              binding.interest_method AS "interestMethod",binding.annual_interest_rate::numeric AS "annualInterestRate",
+              binding.processing_fee_type AS "processingFeeType",binding.processing_fee_value::numeric AS "processingFeeValue",
+              binding.late_fee_type AS "lateFeeType",binding.late_fee_value::numeric AS "lateFeeValue",
+              binding.early_settlement_allowed AS "earlySettlementAllowed",
+              binding.charge_codes AS "chargeCodes",binding.commission_codes AS "commissionCodes"
+       FROM public.credit_product_bindings binding
+       LEFT JOIN public.credit_lenders lender ON lender.id=binding.lender_id
+       WHERE binding.product_id=$1 AND binding.currency=upper(COALESCE($2,binding.currency))
+         AND binding.status='ACTIVE'
+       ORDER BY binding.version DESC LIMIT 1`,
+      [rows[0].productId, rows[0].currency]
+    );
+    return { ...rows[0], reasons, commercialBinding: commercialBindings[0] ?? null, steps };
   }
 
   async listExecutions(query: ListQueryDto) {
@@ -284,6 +325,9 @@ export class CreditRuleEvaluatorService {
       };
     }
     if (!provider) throw new Error('No active score provider is configured');
+    if (provider.provider_mode === 'SUBMITTED') {
+      throw new Error('The active score provider requires a submitted score and A-J grade');
+    }
     if (!dto.forceRescore) {
       const cached = await this.dataSource.query(
         `SELECT id::text,score::numeric,customer_category,model_id,model_version,
@@ -334,7 +378,7 @@ export class CreditRuleEvaluatorService {
       `SELECT id::text,code,name,http_integration_id::text,score_response_path,
               category_response_path,model_id_response_path,model_version_response_path,
               reference_response_path,scored_at_response_path,score_min::text,score_max::text,
-              validity_minutes,is_default,is_active
+              validity_minutes,is_default,is_active,provider_mode
        FROM public.credit_score_providers
        WHERE is_active AND ($1::text IS NULL OR code=upper($1))
        ORDER BY CASE WHEN code=upper($1) THEN 0 WHEN is_default THEN 1 ELSE 2 END,id
@@ -392,7 +436,7 @@ export class CreditRuleEvaluatorService {
     let scope =
       `status='ACTIVE'
        AND product_id=$1
-       AND customer_category=upper($2)
+       AND customer_category IN (upper($2),'ANY')
        AND (minimum_score IS NULL OR minimum_score<=$3)
        AND (maximum_score IS NULL OR maximum_score>=$3)
        AND (currency IS NULL OR currency=upper($4))
@@ -402,7 +446,7 @@ export class CreditRuleEvaluatorService {
       params.push(dto.masterRuleId);
       scope =
         `id=$5::bigint AND status IN ('DRAFT','PENDING_APPROVAL','APPROVED','ACTIVE')
-         AND product_id=$1 AND customer_category=upper($2)
+         AND product_id=$1 AND customer_category IN (upper($2),'ANY')
          AND (minimum_score IS NULL OR minimum_score<=$3)
          AND (maximum_score IS NULL OR maximum_score>=$3)
          AND (currency IS NULL OR currency=upper($4))`;
@@ -420,6 +464,22 @@ export class CreditRuleEvaluatorService {
     return rows[0] ?? null;
   }
 
+  private async resolveCommercialBinding(dto: EvaluateCreditDto): Promise<Record<string,unknown>|null> {
+    const rows = await this.dataSource.query(
+      `SELECT binding.id::text,binding.code,binding.version,binding.wallet_type_code,
+              binding.lender_id::text,binding.interest_method,binding.annual_interest_rate,
+              binding.charge_codes,binding.commission_codes
+       FROM public.credit_product_bindings binding
+       JOIN public.credit_lenders lender ON lender.id=binding.lender_id AND lender.status='ACTIVE'
+       WHERE binding.status='ACTIVE' AND binding.product_id=$1
+         AND binding.country_code=upper($2) AND binding.currency=upper($3)
+         AND (binding.channel IS NULL OR binding.channel=upper($4))
+       ORDER BY CASE WHEN binding.channel=upper($4) THEN 0 ELSE 1 END,binding.version DESC LIMIT 1`,
+      [dto.productId,dto.decisionInputs.countryCode,dto.currency ?? '',dto.decisionInputs.channel]
+    );
+    return rows[0] ?? null;
+  }
+
   private async readSource(
     rule: CreditRuleRow,
     context: EvaluationContext,
@@ -428,6 +488,11 @@ export class CreditRuleEvaluatorService {
     if (rule.source_type === 'AI_RESULT') {
       const value = this.http.readPath(context.aiResult, rule.ai_result_field ?? '');
       return { value, reference: `aiResult.${rule.ai_result_field}` };
+    }
+    if (rule.source_type === 'DECISION_INPUT') {
+      const path=rule.ai_result_field || '';
+      return {value:path ? this.http.readPath(context.decisionInputs,path) : context.decisionInputs,
+        reference:`decisionInput.${path || '*'}`};
     }
     if (rule.source_type === 'HTTP_API') {
       const integration = await this.getIntegration(rule.http_integration_id ?? '');
@@ -519,6 +584,14 @@ export class CreditRuleEvaluatorService {
       case 'SET_CREDIT_OFFER':
         context.currentLimit = Number(action.limit);
         break;
+      case 'SET_LIMIT_FROM_INPUT_MULTIPLIER': {
+        const input=this.http.readPath(context.decisionInputs,String(action.inputField || ''));
+        this.requireNumericSource(Number(input),action.type);
+        const calculated=Number(input)*Number(action.multiplier);
+        context.currentLimit=Math.min(Number(action.cap ?? Number.MAX_SAFE_INTEGER),
+          Math.max(Number(action.floor ?? 0),calculated));
+        break;
+      }
       default:
         break;
     }

@@ -14,7 +14,8 @@ import {
   Matches,
   Max,
   MaxLength,
-  Min
+  Min,
+  ValidateNested
 } from 'class-validator';
 
 const upper = ({ value }: { value: unknown }) => String(value).trim().toUpperCase();
@@ -58,6 +59,7 @@ export class CreateScoreProviderDto {
   @IsOptional() @Type(() => Number) @IsNumber() scoreMax?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(525600) validityMinutes = 43200;
   @IsOptional() @IsBoolean() isDefault = false;
+  @IsOptional() @IsIn(['HTTP','SUBMITTED']) providerMode: 'HTTP'|'SUBMITTED' = 'HTTP';
 }
 
 export class UpdateScoreProviderDto {
@@ -73,6 +75,7 @@ export class UpdateScoreProviderDto {
   @IsOptional() @Type(() => Number) @IsNumber() scoreMax?: number;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(525600) validityMinutes?: number;
   @IsOptional() @IsBoolean() isDefault?: boolean;
+  @IsOptional() @IsIn(['HTTP','SUBMITTED']) providerMode?: 'HTTP'|'SUBMITTED';
 }
 
 export class CreateMasterRuleDto {
@@ -117,7 +120,7 @@ export class CreateRuleDto {
   @IsOptional() @IsString() description?: string;
   @Type(() => Number) @IsInt() @Min(1) @Max(100000) priority: number;
   @IsOptional() @IsString() @MaxLength(100) exclusiveGroup?: string;
-  @IsIn(['AI_RESULT','POSTGRES','HTTP_API']) sourceType: 'AI_RESULT'|'POSTGRES'|'HTTP_API';
+  @IsIn(['AI_RESULT','DECISION_INPUT','POSTGRES','HTTP_API']) sourceType: 'AI_RESULT'|'DECISION_INPUT'|'POSTGRES'|'HTTP_API';
   @IsOptional() @IsString() aiResultField?: string;
   @IsOptional() @IsString() schemaName?: string;
   @IsOptional() @IsString() tableName?: string;
@@ -144,7 +147,7 @@ export class UpdateRuleDto {
   @IsOptional() @IsString() description?: string;
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(100000) priority?: number;
   @IsOptional() @IsString() @MaxLength(100) exclusiveGroup?: string;
-  @IsOptional() @IsIn(['AI_RESULT','POSTGRES','HTTP_API']) sourceType?: string;
+  @IsOptional() @IsIn(['AI_RESULT','DECISION_INPUT','POSTGRES','HTTP_API']) sourceType?: string;
   @IsOptional() @IsString() aiResultField?: string;
   @IsOptional() @IsString() schemaName?: string;
   @IsOptional() @IsString() tableName?: string;
@@ -183,6 +186,43 @@ export class AiResultDto {
   @IsOptional() @IsString() referenceId?: string;
 }
 
+export class CreditDecisionInputsDto {
+  @Transform(upper) @IsIn(['A','B','C','D','E','F','G','H','I','J']) grade: string;
+  @Transform(upper) @IsIn(['APP','USSD','WEB','API','AGENT']) channel: string;
+  @Transform(upper) @IsIn(['UGA']) countryCode: string;
+  @Transform(upper) @IsIn(['VERIFIED','NOT_VERIFIED','FAILED']) kycStatus: string;
+  @Transform(upper) @IsIn(['PASS','FAIL','NO_RECORD']) bureauStatus: string;
+  @Type(() => Number) @IsNumber() @Min(0) ageYears: number;
+  @Type(() => Number) @IsNumber() @Min(0) dominantCashFlow: number;
+  @Type(() => Number) @IsNumber() @Min(0) modelProposedLimit: number;
+  @Type(() => Number) @IsNumber() @Min(0) telecomTenureMonths: number;
+  @Type(() => Number) @IsNumber() @Min(0) currentDpd: number;
+  @Type(() => Number) @IsNumber() @Min(0) count30PlusDpd6Months: number;
+  @Type(() => Number) @IsNumber() @Min(0) maxDpd6Months: number;
+  @Type(() => Number) @IsNumber() @Min(0) maxDpd12Months: number;
+  @Type(() => Number) @IsNumber() @Min(0) currentOpenLoans: number;
+  @Type(() => Number) @IsNumber() @Min(0) dpd30Days: number;
+  @Type(() => Number) @IsNumber() @Min(0) dpd60Days: number;
+  @Type(() => Number) @IsNumber() @Min(0) dpd90Days: number;
+  @Type(() => Number) @IsNumber() @Min(0) @Max(10) churnBand: number;
+  @IsBoolean() dormantAfterAllocation: boolean;
+  @IsBoolean() schoolAggregatorTermPaid: boolean;
+}
+
+export class ManualReviewRecommendationDto {
+  @Transform(upper) @IsIn(['APPROVE','REJECT']) recommendation: 'APPROVE'|'REJECT';
+  @Transform(upper) @IsString() @IsNotEmpty() reasonCode: string;
+  @IsString() @IsNotEmpty() @MaxLength(2000) comment: string;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) recommendedLimit?: number;
+}
+
+export class ManualReviewDecisionDto {
+  @Transform(upper) @IsIn(['APPROVED','REJECTED']) decision: 'APPROVED'|'REJECTED';
+  @Transform(upper) @IsString() @IsNotEmpty() reasonCode: string;
+  @IsString() @IsNotEmpty() @MaxLength(2000) comment: string;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0) approvedLimit?: number;
+}
+
 export class EvaluateCreditDto {
   @ApiProperty({ example: '447700900123' })
   @IsString() @IsNotEmpty() customerId: string;
@@ -201,6 +241,8 @@ export class EvaluateCreditDto {
   @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() forceRescore = false;
   @ApiPropertyOptional({ default: false }) @IsOptional() @IsBoolean() simulation = false;
   @ApiPropertyOptional() @IsOptional() @IsString() masterRuleId?: string;
+  @ApiProperty({ type: CreditDecisionInputsDto })
+  @ValidateNested() @Type(() => CreditDecisionInputsDto) decisionInputs: CreditDecisionInputsDto;
 }
 
 export class ListQueryDto {

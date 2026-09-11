@@ -98,7 +98,7 @@ export class CreditRuleManagementService {
               provider.category_response_path AS "categoryResponsePath",
               provider.score_min::numeric AS "scoreMin",provider.score_max::numeric AS "scoreMax",
               provider.validity_minutes AS "validityMinutes",provider.is_default AS "isDefault",
-              provider.is_active AS "isActive",provider.created_by AS "createdBy",
+              provider.provider_mode AS "providerMode",provider.is_active AS "isActive",provider.created_by AS "createdBy",
               provider.approved_by AS "approvedBy"
        FROM public.credit_score_providers provider
        JOIN public.credit_http_integrations integration ON integration.id=provider.http_integration_id
@@ -115,13 +115,13 @@ export class CreditRuleManagementService {
       `INSERT INTO public.credit_score_providers(
         code,name,http_integration_id,score_response_path,category_response_path,
         model_id_response_path,model_version_response_path,reference_response_path,
-        scored_at_response_path,score_min,score_max,validity_minutes,is_default,is_active,created_by
-       ) VALUES(upper($1),$2,$3::bigint,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,false,$14)
+        scored_at_response_path,score_min,score_max,validity_minutes,is_default,provider_mode,is_active,created_by
+       ) VALUES(upper($1),$2,$3::bigint,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,false,$15)
        RETURNING id::text,code,name,is_default AS "isDefault",is_active AS "isActive"`,
       [dto.code,dto.name,dto.httpIntegrationId,dto.scoreResponsePath,dto.categoryResponsePath,
         dto.modelIdResponsePath ?? null,dto.modelVersionResponsePath ?? null,dto.referenceResponsePath ?? null,
         dto.scoredAtResponsePath ?? null,dto.scoreMin ?? null,dto.scoreMax ?? null,
-        dto.validityMinutes,dto.isDefault,actor]
+        dto.validityMinutes,dto.isDefault,dto.providerMode,actor]
     );
     return rows[0];
   }
@@ -146,6 +146,7 @@ export class CreditRuleManagementService {
       scoreMax: dto.scoreMax ?? this.numberOrNull(current.score_max),
       validityMinutes: dto.validityMinutes ?? current.validity_minutes,
       isDefault: dto.isDefault ?? current.is_default
+      ,providerMode: dto.providerMode ?? current.provider_mode
     };
     if (next.scoreMin !== null && next.scoreMax !== null && next.scoreMax < next.scoreMin) {
       throw new BadRequestException('scoreMax must be greater than or equal to scoreMin');
@@ -156,8 +157,8 @@ export class CreditRuleManagementService {
          name=$2,http_integration_id=$3::bigint,score_response_path=$4,category_response_path=$5,
          model_id_response_path=$6,model_version_response_path=$7,reference_response_path=$8,
          scored_at_response_path=$9,score_min=$10,score_max=$11,validity_minutes=$12,
-         is_default=$13,is_active=false,approved_by=NULL,approved_at=NULL,
-         updated_by=$14,updated_at=CURRENT_TIMESTAMP
+         is_default=$13,provider_mode=$14,is_active=false,approved_by=NULL,approved_at=NULL,
+         updated_by=$15,updated_at=CURRENT_TIMESTAMP
        WHERE id=$1::bigint
        RETURNING id::text,code,name,is_default AS "isDefault",is_active AS "isActive"`,
       [
@@ -174,6 +175,7 @@ export class CreditRuleManagementService {
         next.scoreMax,
         next.validityMinutes,
         next.isDefault,
+        next.providerMode,
         actor
       ]
     );
@@ -183,7 +185,7 @@ export class CreditRuleManagementService {
   async approveScoreProvider(id: string, actor: string) {
     const rows = await this.dataSource.query<Array<Record<string,unknown>>>(
       `SELECT provider.id::text,provider.created_by,provider.is_default,
-              integration.is_active AS integration_active
+              integration.is_active AS integration_active,provider.provider_mode
        FROM public.credit_score_providers provider
        JOIN public.credit_http_integrations integration ON integration.id=provider.http_integration_id
        WHERE provider.id=$1::bigint`,
@@ -191,7 +193,7 @@ export class CreditRuleManagementService {
     );
     if (!rows[0]) throw new NotFoundException('Score provider was not found');
     if (rows[0].created_by === actor) throw new ConflictException('The score-provider checker must differ from the maker');
-    if (!rows[0].integration_active) {
+    if (rows[0].provider_mode !== 'SUBMITTED' && !rows[0].integration_active) {
       throw new ConflictException('The score provider HTTP integration must be active');
     }
     return this.dataSource.transaction(async (manager) => {
@@ -560,6 +562,9 @@ export class CreditRuleManagementService {
     }
     if (dto.sourceType === 'AI_RESULT' && !dto.aiResultField) {
       throw new BadRequestException('AI_RESULT rules require aiResultField');
+    }
+    if (dto.sourceType === 'DECISION_INPUT' && dto.aiResultField?.trim() === '') {
+      throw new BadRequestException('DECISION_INPUT field path must be omitted or non-empty');
     }
     if (dto.sourceType === 'POSTGRES') await this.sources.validatePostgresSource(dto);
     if (dto.sourceType === 'HTTP_API') {

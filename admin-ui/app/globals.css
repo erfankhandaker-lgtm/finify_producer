@@ -577,6 +577,15 @@ kbd { padding: 3px 6px; color: #5b7569; border: 1px solid #1f4235; background: #
 .treasury-message.error { color: #ff9992; background: rgba(255,82,76,.045); }
 .treasury-warning { margin-top: 18px; padding: 12px; display: flex; gap: 9px; align-items: flex-start; color: #8aa398; border: 1px solid #24483a; background: rgba(56,245,138,.025); font: 8px/1.6 monospace; }
 .treasury-warning svg { width: 15px; min-width: 15px; color: var(--emerald); }
+.treasury-journal-preview { display: grid; gap: 8px; padding: 13px; border: 1px solid #28533f; background: linear-gradient(135deg, rgba(56,245,138,.045), rgba(4,10,7,.72)); }
+.treasury-journal-preview > div:first-child { display: grid; gap: 3px; }
+.treasury-journal-preview > div:first-child span { color: var(--emerald); font: 7px monospace; letter-spacing: .14em; }
+.treasury-journal-preview > div:first-child strong { color: #c6dbd1; font: 10px monospace; }
+.treasury-journal-line { display: grid; grid-template-columns: 25px minmax(0,1fr) auto; align-items: center; gap: 8px; padding: 8px 9px; border: 1px solid #18352a; background: #050b08; font: 9px monospace; }
+.treasury-journal-line b { color: var(--emerald); }
+.treasury-journal-line span { color: #88a398; }
+.treasury-journal-line strong { color: #d5e6de; }
+.treasury-journal-preview > small { color: #70887d; font: 8px/1.5 monospace; }
 .data-table-wrap { overflow: auto; }
 .data-table { width: 100%; border-collapse: collapse; white-space: nowrap; }
 .data-table th { height: 37px; padding: 0 14px; color: #3f594e; border-bottom: 1px solid #142d24; text-align: left; font: 7px monospace; letter-spacing: .09em; }
@@ -950,6 +959,11 @@ kbd { padding: 3px 6px; color: #5b7569; border: 1px solid #1f4235; background: #
 .configuration-form .themed-date-field { display: grid; gap: 7px; color: #526a60; font: 8px monospace; letter-spacing: .1em; }
 .configuration-form label small { color: #60776d; font: 8px monospace; letter-spacing: 0; line-height: 1.5; }
 .configuration-form input, .configuration-form select, .configuration-form textarea { width: 100%; border: 1px solid #213a31; outline: 0; background: #060b09; color: #b5c9c0; padding: 11px; font: 10px monospace; resize: vertical; }
+.configuration-form select { appearance: none; padding-right: 38px; background-color: #060b09; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2338f58a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; color-scheme: dark; cursor: pointer; transition: border-color .16s ease, box-shadow .16s ease, background-color .16s ease; }
+.configuration-form select:hover:not(:disabled) { border-color: #37634f; background-color: #09120e; }
+.configuration-form select:focus-visible { border-color: #38f58a99; box-shadow: 0 0 0 1px rgba(56,245,138,.14), 0 0 18px rgba(56,245,138,.07); }
+.configuration-form select option { background: #07100c; color: #c8dbd2; }
+.configuration-form select:disabled { opacity: .55; cursor: not-allowed; }
 .configuration-form input[type="file"] { padding: 8px; }
 .configuration-form input:focus, .configuration-form select:focus, .configuration-form textarea:focus { border-color: #2a7457; }
 .configuration-form .command-button { margin-top: 5px; }
