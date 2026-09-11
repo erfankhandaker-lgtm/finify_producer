@@ -11,7 +11,7 @@
   "dependencies": {
     "@fontsource-variable/manrope": "latest",
     "lucide-react": "latest",
-    "next": "^16.2.11",
+    "next": "^16.3.4",
     "react": "latest",
     "react-dom": "latest"
   },
@@ -19,9 +19,9 @@
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "eslint": "^9.39.5",
-    "eslint-config-next": "^16.2.11",
-    "typescript": "^5.9.3"
+    "eslint": "^10.10.0",
+    "eslint-config-next": "^16.3.4",
+    "typescript": "^7.0.2"
   },
   "overrides": {
     "brace-expansion": "5.0.8",
